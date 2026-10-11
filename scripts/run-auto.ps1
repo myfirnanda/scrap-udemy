@@ -59,7 +59,19 @@ if (Test-Path -LiteralPath $queueStateFile) {
   catch { Write-Warning 'Queue state lama tidak dapat dibaca; queue baru akan dibuat.' }
 }
 
-$unfinishedSaved = @(if ($queueState) { $queueState.courses | Where-Object Status -ne 'completed' })
+$savedCourses = @(if ($queueState) { $queueState.courses })
+foreach ($course in $savedCourses) {
+  if (-not $course.PSObject.Properties['Source']) {
+    if ([int]$queueState.version -ge 2) { throw "Queue v2 tidak memiliki sumber input untuk $($course.Url); eksekusi dihentikan." }
+    Add-Member -InputObject $course -NotePropertyName Source -NotePropertyValue 'legacy-queue'
+  }
+  if ($course.Source -notin @('terminal-input', 'terminal-input-legacy', 'legacy-queue', 'recovered-from-run-history')) {
+    throw "Sumber input queue tidak dikenali untuk $($course.Url): $($course.Source)"
+  }
+  if (-not $course.PSObject.Properties['AddedAt']) { Add-Member -InputObject $course -NotePropertyName AddedAt -NotePropertyValue $queueState.createdAt }
+}
+if ($queueState -and [int]$queueState.version -lt 2) { $queueState.version = 2 }
+$unfinishedSaved = @($savedCourses | Where-Object Status -ne 'completed')
 if ($unfinishedSaved.Count -gt 0) {
   foreach ($course in $unfinishedSaved) {
     $course.Status = 'pending'
@@ -94,9 +106,19 @@ if ($unfinishedSaved.Count -gt 0) {
   }
   $now = (Get-Date).ToUniversalTime().ToString('o')
   $courses = for ($index = 0; $index -lt $urls.Count; $index++) {
-    [pscustomobject]@{ Number = $index + 1; Url = $urls[$index]; Status = 'pending'; Reason = $null; LastExitCode = $null; LastLog = $null; UpdatedAt = $now }
+    [pscustomobject]@{
+      Number = $index + 1
+      Url = $urls[$index]
+      Source = 'terminal-input'
+      AddedAt = $now
+      Status = 'pending'
+      Reason = $null
+      LastExitCode = $null
+      LastLog = $null
+      UpdatedAt = $now
+    }
   }
-  $queueState = [pscustomobject]@{ version = 1; createdAt = $now; updatedAt = $now; courses = @($courses) }
+  $queueState = [pscustomobject]@{ version = 2; createdAt = $now; updatedAt = $now; courses = @($courses) }
   $courseQueue = @($queueState.courses)
   Save-QueueState -State $queueState
 }
