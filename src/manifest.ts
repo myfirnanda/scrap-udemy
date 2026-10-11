@@ -38,6 +38,8 @@ export interface Lecture {
     lastCue: string | null;
     extractedAt: string;
     language?: string;
+    source?: 'udemy' | 'whisper-local';
+    sourceLanguage?: string;
   } | null;
 }
 export interface Section { number: number; title: string; id: string | null; lectures: Lecture[] }

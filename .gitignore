@@ -3,6 +3,8 @@ dist/
 output/
 .chrome-profile/
 .playwright-cli/
+.whisper-venv/
+.whisper-models/
 logs/
 .env
 .env.*

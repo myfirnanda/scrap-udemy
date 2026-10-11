@@ -2,7 +2,7 @@
 
 Scraper lokal untuk mengekspor transcript video, article, resource teks, attachment, dan link eksternal dari course Udemy ke Markdown.
 
-Automasi menggunakan Chrome yang sudah login, Playwright CLI, dan [Playwright Extension resmi](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm). Scraper tidak memakai CDP port `9222`, tidak mengunduh video/audio, dan tidak memanggil API LLM.
+Automasi menggunakan Chrome yang sudah login, Playwright CLI, dan [Playwright Extension resmi](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm). Scraper tidak memakai CDP port `9222` dan tidak memanggil API LLM. Jika Udemy tidak menyediakan transcript, audio sementara diproses secara lokal lalu dihapus.
 
 > Gunakan hanya untuk course yang dapat Anda akses dan konten yang diizinkan untuk diekspor. Jangan mempublikasikan hasil course tanpa izin pemiliknya.
 
@@ -10,6 +10,7 @@ Automasi menggunakan Chrome yang sudah login, Playwright CLI, dan [Playwright Ex
 
 - Transcript video, article, dan resource teks disimpan sebagai Markdown.
 - Transcript beraksara Arab otomatis dialihkan ke caption English Udemy sebelum disimpan.
+- Video tanpa transcript Udemy diproses otomatis menggunakan Whisper lokal dalam bahasa Inggris.
 - Banyak attachment dalam satu lecture dapat diunduh.
 - Link eksternal disimpan terpisah dalam `00_EXTERNAL_RESOURCES.md`.
 - Struktur output mengikuti course, section, dan lecture.
@@ -55,6 +56,7 @@ flowchart TD
 - Google Chrome.
 - Akun Udemy yang mempunyai akses ke course.
 - [Playwright Extension resmi di Chrome Web Store](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm).
+- Python 3.9 atau lebih baru dan FFmpeg untuk fallback Whisper lokal.
 
 ## Instalasi
 
@@ -120,6 +122,8 @@ Transcript [####################] 100% | 271 cue | tersimpan
 ```
 
 Progress diperbarui pada satu baris terminal yang sama agar output tidak memenuhi layar. Persentase bertanda `~` adalah estimasi posisi panel transcript terhadap durasi video. Nilainya dapat diam sementara ketika Udemy menambah tinggi panel secara dinamis; nomor batch, jumlah cue, dan waktu berjalan tetap menunjukkan proses masih aktif. Angka `100%` hanya ditampilkan setelah Markdown berhasil disimpan.
+
+Jika transcript Udemy tetap tidak tersedia setelah tiga pemeriksaan, scraper memakai Whisper lokal. Audio diproses pada kecepatan asli agar akurat; inferensi berjalan secepat kemampuan CPU tanpa memutar video sampai selesai. Model `base` sekitar 150 MB diunduh satu kali dan disimpan dalam `.whisper-models/`. Audio sementara dihapus setelah Markdown tersimpan. Sumber transcript dicatat sebagai `whisper-local` dalam `course_manifest.json`.
 
 Queue diproses secara berurutan agar transcript dan resource tidak tertukar. Setelah course pertama selesai, scraper otomatis membuka course kedua pada tab Course Player yang sama. URL duplikat tidak ditambahkan dua kali.
 
@@ -197,7 +201,7 @@ Saat URL dijalankan kembali, curriculum terbaru dibandingkan dengan manifest. Le
 ### Kelebihan
 
 - Menggunakan sesi login Chrome yang sudah ada.
-- Tidak memakai token atau API LLM.
+- Tidak memakai token atau API transkripsi berbayar.
 - Resume tersedia pada level lecture dan attachment.
 - Mendukung banyak instructor dan banyak resource.
 - Output Markdown mudah dicari dan dibaca.
@@ -206,10 +210,10 @@ Saat URL dijalankan kembali, curriculum terbaru dibandingkan dengan manifest. Le
 
 - Workflow utama dibuat untuk Windows/PowerShell.
 - Bergantung pada struktur DOM Udemy yang dapat berubah.
-- Transcript hanya tersedia jika disediakan oleh Udemy.
-- Jika transcript Arab tidak memiliki pilihan caption English, lecture dicatat gagal agar teks Arab tidak disimpan sebagai hasil akhir.
+- Whisper lokal menggunakan CPU sehingga lebih lambat daripada transcript bawaan Udemy dan dapat salah mengenali istilah teknis.
+- Caption Arab tanpa pilihan English diterjemahkan ke English oleh Whisper lokal.
 - Transcript tidak menyertakan timestamp atau speaker.
-- Video, audio, quiz, dan exercise interaktif tidak diekspor.
+- Video dan audio tidak disimpan sebagai output; quiz dan exercise interaktif tidak diekspor.
 - Pemrosesan masih berurutan, belum paralel.
 
 ## Troubleshooting

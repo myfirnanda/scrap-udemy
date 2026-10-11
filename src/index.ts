@@ -10,13 +10,14 @@ import { installConsoleLogFile } from './logging.js';
 import { appendTranscriptCues, transcriptCompletedLine, transcriptPercent, transcriptProgressLine, type TranscriptBatch, type TranscriptCue } from './transcript-progress.js';
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
 import { isArabicTranscript } from './transcript-language.js';
+import { shouldUseLocalWhisper, transcribeWithLocalWhisper } from './local-whisper.js';
 
 installConsoleLogFile(process.env.RUN_LOG_FILE);
 
 type Mode = 'lecture' | 'section' | 'all';
 type Availability = 'available' | 'unavailable' | 'retryable';
 type HtmlResult = { html: string | null; reason: string | null; availability?: Availability };
-type TextResult = { content: string | null; reason: string | null; availability?: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string };
+type TextResult = { content: string | null; reason: string | null; availability?: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string; source?: 'udemy' | 'whisper-local'; sourceLanguage?: string };
 type LogEntry = { time: string; section: number; lecture: number; status: string; reason?: string; attachmentReason?: string };
 type CourseIdentity = { courseTitle: string; courseOwner: string; courseUrl: string };
 type DiscoveredAttachment = { sourceIndex: number; name: string; href: string; kind: 'download' | 'external' | 'unknown' };
@@ -155,7 +156,7 @@ function toMarkdown(html: string): string {
   return new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced' }).turndown(html).trim() + '\n';
 }
 
-async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResult> {
+async function extractVideoTranscript(progressLine: LiveLine, root: string, lecture: Lecture, allowLocalWhisper: boolean): Promise<TextResult> {
   progressLine.stopSpinner();
   const started = Date.now();
   const cues: TranscriptCue[] = [];
@@ -168,6 +169,10 @@ async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResul
     progressLine.update('      Transcript [menyiapkan] membuka panel dan membaca durasi video...');
     let batch = await runCodeFile<TranscriptBatch>('scripts/init-transcript.js');
     if (batch.availability !== 'available') {
+      if (allowLocalWhisper && shouldUseLocalWhisper(batch.reason)) {
+        progressLine.update(`      Transcript Udemy tidak tersedia; memakai Whisper lokal untuk "${lecture.title}"...`);
+        return { ...(await transcribeWithLocalWhisper(root, lecture, progressLine)), availability: 'available', reason: null };
+      }
       progressLine.finish(`      Transcript [tidak tersedia] ${batch.reason ?? 'Panel transcript tidak tersedia.'}`);
       activeTranscriptLine = null;
       return { content: null, availability: batch.availability, reason: batch.reason };
@@ -208,6 +213,7 @@ async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResul
       firstCue: cues[0]?.text ?? null,
       lastCue: cues.at(-1)?.text ?? null,
       language,
+      source: 'udemy',
       availability: 'available',
       reason: null
     };
@@ -216,18 +222,18 @@ async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResul
   }
 }
 
-async function extract(lecture: Lecture, progressLine: LiveLine): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string }> {
+async function extract(lecture: Lecture, progressLine: LiveLine, root: string, allowLocalWhisper: boolean): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string; source?: 'udemy' | 'whisper-local'; sourceLanguage?: string }> {
   const types = lecture.type === 'unknown' ? (['article', 'video', 'resource'] as const) : [lecture.type];
   let retryReason: string | null = null;
   for (const type of types) {
     if (type === 'video') {
-      const result = await extractVideoTranscript(progressLine);
+      const result = await extractVideoTranscript(progressLine, root, lecture, allowLocalWhisper);
       if (result.availability === 'retryable') {
         retryReason = result.reason ?? 'Transcript belum siap.';
         if (lecture.type !== 'unknown') throw new TransientContentError(retryReason);
         continue;
       }
-      if (result.content?.trim()) return { content: result.content, reason: null, type, availability: 'available', cueCount: result.cueCount, firstCue: result.firstCue, lastCue: result.lastCue, language: result.language };
+      if (result.content?.trim()) return { content: result.content, reason: null, type, availability: 'available', cueCount: result.cueCount, firstCue: result.firstCue, lastCue: result.lastCue, language: result.language, source: result.source, sourceLanguage: result.sourceLanguage };
       if (lecture.type !== 'unknown') return { content: null, reason: result.reason, type, availability: 'unavailable' };
     } else if (type === 'article' || type === 'resource') {
       const result = await runCodeFile<HtmlResult>(`scripts/extract-${type}.js`);
@@ -486,7 +492,7 @@ async function main(): Promise<void> {
           stage = 'content';
           if (lecture.status !== 'completed' && lecture.status !== 'unavailable' && lecture.status !== 'skipped') {
             activeTranscriptLine.setSpinnerLabel(lecture.type === 'video' ? 'Menyiapkan transcript...' : 'Mengekstrak konten...');
-            const result = await extract(lecture, activeTranscriptLine);
+            const result = await extract(lecture, activeTranscriptLine, root, attempt === maxAttempts);
             lecture.type = result.type;
             if (!result.content?.trim()) {
               activeTranscriptLine?.finish(`      Transcript [tidak tersedia] ${result.reason ?? 'Konten tidak tersedia.'}`);
@@ -509,7 +515,9 @@ async function main(): Promise<void> {
                 firstCue: result.firstCue ?? null,
                 lastCue: result.lastCue ?? null,
                 extractedAt: new Date().toISOString(),
-                language: result.language
+                language: result.language,
+                source: result.source ?? 'udemy',
+                sourceLanguage: result.sourceLanguage
               } : null;
             }
           }
