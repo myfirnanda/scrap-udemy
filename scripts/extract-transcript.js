@@ -13,11 +13,7 @@ async (page) => {
   await scroll.evaluate(el => { el.scrollTop = 0; });
   let all = [];
   let tailStable = 0;
-  let noProgress = 0;
   let lastTailKey = '';
-  let previousTotal = 0;
-  const startedAt = Date.now();
-  const maxDurationMs = 60000;
   const readCues = () => panel.locator('[data-purpose="cue-text"]').evaluateAll(nodes => nodes.map(node => {
     const text = (node.textContent || '').trim().replace(/\s+/g, ' ');
     const container = node.closest('button, [data-purpose*="cue"]');
@@ -32,10 +28,7 @@ async (page) => {
     }
     all.push(...snapshot.slice(overlap));
   };
-  for (let step = 0; step < 300; step++) {
-    if (Date.now() - startedAt > maxDurationMs) {
-      throw new Error('Transcript belum stabil dalam batas waktu 60 detik.');
-    }
+  for (let step = 0; step < 1000; step++) {
     const snapshot = await readCues();
     appendSnapshot(snapshot);
     await scroll.evaluate(el => {
@@ -62,11 +55,9 @@ async (page) => {
     }));
     const tailKey = settledSnapshot.at(-1)?.key ?? '';
     tailStable = settled.end && tailKey && tailKey === lastTailKey ? tailStable + 1 : 0;
-    noProgress = all.length === previousTotal ? noProgress + 1 : 0;
     lastTailKey = tailKey;
-    previousTotal = all.length;
-    if (tailStable >= 3 || noProgress >= 8) break;
-    if (step === 299) throw new Error('Transcript belum mencapai akhir setelah 300 scroll.');
+    if (tailStable >= 3) break;
+    if (step === 999) throw new Error('Transcript belum mencapai akhir setelah 1000 scroll.');
   }
   const finalSnapshot = await readCues();
   let finalOverlap = 0;
