@@ -7,11 +7,26 @@ async (page) => {
   if (!await panel.isVisible().catch(() => false)) {
     await page.evaluate(() => window.scrollTo(0, 0));
     const toggle = page.locator('[data-purpose="transcript-toggle"]');
-    if (!await toggle.count()) return { availability: 'retryable', reason: 'Kontrol transcript tidak ditemukan; transcript belum dapat dikonfirmasi tidak tersedia.' };
-    try { await toggle.click({ timeout: 3000 }); }
-    catch { await toggle.evaluate(el => el.click()); }
-    try { await panel.waitFor({ state: 'visible', timeout: 8000 }); }
-    catch { return { availability: 'retryable', reason: 'Panel transcript belum siap setelah timeout.' }; }
+    if (!await toggle.count()) {
+      await page.waitForFunction(() =>
+        !!document.querySelector('[data-purpose="transcript-toggle"], [data-purpose="transcript-panel"]'),
+        undefined,
+        { timeout: 5000 }
+      ).catch(() => {});
+    }
+    if (await panel.isVisible().catch(() => false)) {
+      // Panel became available while waiting for the Course Player to settle.
+    } else if (!await toggle.count()) {
+      const videoReady = await page.locator('video').first().evaluate(video => video.readyState >= 2).catch(() => false);
+      return videoReady
+        ? { availability: 'unavailable', reason: 'Video siap tetapi kontrol transcript tidak tersedia.' }
+        : { availability: 'retryable', reason: 'Kontrol transcript tidak ditemukan; transcript belum dapat dikonfirmasi tidak tersedia.' };
+    } else {
+      try { await toggle.click({ timeout: 3000 }); }
+      catch { await toggle.evaluate(el => el.click()); }
+      try { await panel.waitFor({ state: 'visible', timeout: 8000 }); }
+      catch { return { availability: 'retryable', reason: 'Panel transcript belum siap setelah timeout.' }; }
+    }
   }
   await panel.locator('[data-purpose="cue-text"]').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
   const cueSample = async () => (await panel.locator('[data-purpose="cue-text"]').allTextContents()).slice(0, 20).join(' ');

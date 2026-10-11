@@ -169,7 +169,7 @@ async function extractVideoTranscript(progressLine: LiveLine, root: string, lect
     progressLine.update('      Transcript [menyiapkan] membuka panel dan membaca durasi video...');
     let batch = await runCodeFile<TranscriptBatch>('scripts/init-transcript.js');
     if (batch.availability !== 'available') {
-      if (allowLocalWhisper && shouldUseLocalWhisper(batch.reason)) {
+      if ((allowLocalWhisper || batch.availability === 'unavailable') && shouldUseLocalWhisper(batch.reason)) {
         progressLine.update(`      Transcript Udemy tidak tersedia; memakai Whisper lokal untuk "${lecture.title}"...`);
         return { ...(await transcribeWithLocalWhisper(root, lecture, progressLine)), availability: 'available', reason: null };
       }

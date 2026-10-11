@@ -38,7 +38,7 @@ function enabled(): boolean {
 
 export function shouldUseLocalWhisper(reason: string | null | undefined): boolean {
   if (!enabled()) return false;
-  return /kontrol transcript tidak ditemukan|caption english tidak tersedia|panel transcript tersedia tetapi tidak memiliki cue/i.test(reason ?? '');
+  return /kontrol transcript tidak (?:ditemukan|tersedia)|caption english tidak tersedia|panel transcript tersedia tetapi tidak memiliki cue/i.test(reason ?? '');
 }
 
 async function commandWorks(command: string, args: string[]): Promise<boolean> {
