@@ -1,14 +1,18 @@
 async (page) => {
-  const tab = page.getByRole('tab', { name: 'Course content' }).first();
-  await tab.evaluate(el => el.click());
-  const curriculum = page.locator('[data-purpose="curriculum-section-container"]:visible').first();
+  let curriculum = page.locator('[data-purpose="curriculum-section-container"]:visible').first();
+  if (!await curriculum.count()) {
+    let tab = page.getByRole('tab', { name: /^(?:Course content|Konten kursus)$/i }).first();
+    if (!await tab.count()) tab = page.locator('[role="tab"]').first();
+    await tab.evaluate(el => el.click());
+    curriculum = page.locator('[data-purpose="curriculum-section-container"]:visible').first();
+  }
   await curriculum.waitFor({ state: 'visible', timeout: 10000 });
   const closed = curriculum.locator('[data-purpose^="section-panel-"] [data-purpose="section-heading"] button[aria-expanded="false"]');
   for (let i = 0; i < 100 && await closed.count(); i++) await closed.first().evaluate(el => el.click());
   if (await closed.count()) throw new Error('Tidak semua section berhasil dibuka.');
   const sections = await curriculum.evaluate(root => [...root.querySelectorAll('[data-purpose^="section-panel-"]')].map((section, sectionIndex) => {
     const rawTitle = section.querySelector('[data-purpose="section-heading"] button')?.textContent?.trim() ?? '';
-    const title = rawTitle.replace(/^Section\s+\d+:\s*/i, '');
+    const title = rawTitle.replace(/^(?:Section|Bagian)\s+\d+:\s*/i, '');
     const lectures = [...section.querySelectorAll('[data-purpose^="curriculum-item-"]')].map((item, lectureIndex) => {
       const raw = item.querySelector('[data-purpose="item-title"]')?.textContent?.trim() ?? '';
       const title = raw.replace(/^\d+\.\s*/, '');

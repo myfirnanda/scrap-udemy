@@ -103,11 +103,15 @@ export async function loadManifest(file: string): Promise<Manifest | null> {
 export async function reconcileManifest(fresh: Manifest, previous: Manifest | null, root: string): Promise<Manifest> {
   if (!previous || previous.courseUrl !== fresh.courseUrl) return fresh;
   for (const section of fresh.sections) {
-    const oldSection = previous.sections[section.number - 1];
-    if (!oldSection || oldSection.title !== section.title) continue;
+    const oldSection = (section.id
+      ? previous.sections.find(candidate => candidate.id === section.id)
+      : null) ?? previous.sections[section.number - 1];
+    if (!oldSection) continue;
     for (const lecture of section.lectures) {
-      const old = oldSection.lectures[lecture.number - 1];
-      if (!old || old.title !== lecture.title || (old.id && lecture.id && old.id !== lecture.id)) continue;
+      const old = (lecture.id
+        ? oldSection.lectures.find(candidate => candidate.id === lecture.id)
+        : null) ?? oldSection.lectures[lecture.number - 1];
+      if (!old || (old.id && lecture.id && old.id !== lecture.id)) continue;
       if (old.status === 'completed' && old.outputFile && await existsNonempty(path.join(root, old.outputFile))) {
         lecture.status = 'completed';
         lecture.outputFile = old.outputFile;
@@ -118,6 +122,14 @@ export async function reconcileManifest(fresh: Manifest, previous: Manifest | nu
       } else if (old.status === 'skipped' && (lecture.type === 'quiz' || lecture.type === 'exercise')) {
         lecture.status = 'skipped';
         lecture.reason = old.reason;
+      }
+      if (lecture.status === 'pending') {
+        const recoveredOutput = plannedFile(section, lecture);
+        if (await existsNonempty(path.join(root, recoveredOutput))) {
+          lecture.status = 'completed';
+          lecture.reason = null;
+          lecture.outputFile = recoveredOutput;
+        }
       }
       const oldAttachments = old.attachments ?? [];
       const currentResourceFormat = !lecture.hasResources || (oldAttachments.length > 0 && oldAttachments.every(attachment => attachment.kind));

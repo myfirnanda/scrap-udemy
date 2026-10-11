@@ -20,6 +20,7 @@ type LogEntry = { time: string; section: number; lecture: number; status: string
 type CourseIdentity = { courseTitle: string; courseOwner: string; courseUrl: string };
 type DiscoveredAttachment = { sourceIndex: number; name: string; href: string; kind: 'download' | 'external' | 'unknown' };
 type DownloadResult = { kind: 'downloaded' | 'external' | 'retryable' | 'skipped'; suggestedFilename?: string; url?: string; reason?: string };
+type TabVerification = { url: string; title: string; curriculum: boolean; authRequired: boolean };
 
 class SecurityChallengeError extends Error {
   constructor(readonly evidence: string[]) { super(`SECURITY_CHALLENGE_DETECTED: ${evidence.join(', ')}`); }
@@ -79,6 +80,31 @@ function parseOptions(args: string[]): { mode: Mode; output: string; courseUrl: 
   };
 }
 
+function openCoursePlayerCode(courseUrl: string): string {
+  return `async (page) => {
+    await page.goto(${JSON.stringify(courseUrl)}, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForFunction(() =>
+      !!document.querySelector('[data-purpose="curriculum-section-container"]') ||
+      /\\/join\\/(?:login|passwordless-auth)/.test(location.pathname),
+      undefined,
+      { timeout: 30000 }
+    ).catch(() => {});
+    return page.evaluate(() => ({
+      url: location.href,
+      title: document.title,
+      curriculum: !!document.querySelector('[data-purpose="curriculum-section-container"]'),
+      authRequired: /\\/join\\/(?:login|passwordless-auth)/.test(location.pathname)
+    }));
+  }`;
+}
+
+function assertCoursePlayerReady(result: TabVerification): void {
+  if (result.authRequired) {
+    throw new Error(`UDEMY_LOGIN_REQUIRED: Udemy mengalihkan tab ke halaman login (${result.url}).`);
+  }
+  if (!result.curriculum) throw new Error(`Course Player belum siap setelah navigasi otomatis (${result.url}).`);
+}
+
 async function selectUdemyTab(courseUrl: string, allowReconnect = true): Promise<void> {
   let tabs: string;
   try { tabs = await cli(['--raw', 'tab-list']); }
@@ -91,15 +117,10 @@ async function selectUdemyTab(courseUrl: string, allowReconnect = true): Promise
   }
   let matches = tabs.split(/\r?\n/).filter(line => /https:\/\/www\.udemy\.com\/course\/[^/]+\/learn\//i.test(line));
   if (!matches.length && process.env.ZERO_CLICK_EXTENSION === '1') {
-    const target = JSON.stringify(courseUrl);
-    const opened = await runCode<{ url: string; title: string; curriculum: boolean }>(`async (page) => {
-      if (!page.url().startsWith('chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/'))
-        throw new Error('Token extension terhubung ke halaman yang tidak dikenali.');
-      await page.goto(${target}, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.locator('[data-purpose="curriculum-section-container"]').first().waitFor({ state: 'attached', timeout: 30000 });
-      return page.evaluate(() => ({ url: location.href, title: document.title, curriculum: !!document.querySelector('[data-purpose="curriculum-section-container"]') }));
-    }`, 120_000);
-    if (!opened.curriculum) throw new Error('Course Player belum siap setelah navigasi otomatis.');
+    const current = tabs.split(/\r?\n/).find(line => /^- \d+: \(current\)/.test(line));
+    if (!current) throw new Error('Tab pilihan Playwright Extension tidak ditemukan.');
+    const opened = await runCode<TabVerification>(openCoursePlayerCode(courseUrl), 120_000);
+    assertCoursePlayerReady(opened);
     tabs = await cli(['--raw', 'tab-list']);
     matches = tabs.split(/\r?\n/).filter(line => /https:\/\/www\.udemy\.com\/course\/[^/]+\/learn\//i.test(line));
   }
@@ -107,10 +128,10 @@ async function selectUdemyTab(courseUrl: string, allowReconnect = true): Promise
   const match = matches[0].match(/^- (\d+):/);
   if (!match) throw new Error('Indeks tab Udemy tidak dapat dibaca.');
   if (!matches[0].includes('(current)')) await cli(['tab-select', match[1]]);
-  let verified: { url: string; title: string; curriculum: boolean };
+  let verified: TabVerification;
   try {
-    verified = await runCode<{ url: string; title: string; curriculum: boolean }>(
-      'async (page) => page.evaluate(() => ({ url: location.href, title: document.title, curriculum: !!document.querySelector("[data-purpose=curriculum-section-container]") }))'
+    verified = await runCode<TabVerification>(
+      'async (page) => page.evaluate(() => ({ url: location.href, title: document.title, curriculum: !!document.querySelector("[data-purpose=curriculum-section-container]"), authRequired: /\\/join\\/(?:login|passwordless-auth)/.test(location.pathname) }))'
     );
   } catch (error) {
     if (!allowReconnect) throw error;
@@ -122,14 +143,10 @@ async function selectUdemyTab(courseUrl: string, allowReconnect = true): Promise
   const expectedSlug = new URL(courseUrl).pathname.match(/^\/course\/([^/]+)/)?.[1];
   const currentSlug = new URL(verified.url).pathname.match(/^\/course\/([^/]+)/)?.[1];
   if (!verified.curriculum || currentSlug !== expectedSlug) {
-    const target = JSON.stringify(courseUrl);
-    verified = await runCode<{ url: string; title: string; curriculum: boolean }>(`async (page) => {
-      await page.goto(${target}, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.locator('[data-purpose="curriculum-section-container"]').first().waitFor({ state: 'attached', timeout: 30000 });
-      return page.evaluate(() => ({ url: location.href, title: document.title, curriculum: !!document.querySelector('[data-purpose="curriculum-section-container"]') }));
-    }`, 120_000);
+    verified = await runCode<TabVerification>(openCoursePlayerCode(courseUrl), 120_000);
   }
-  if (!verified.curriculum || !/udemy\.com\/course\//i.test(verified.url)) throw new Error('Tab aktif bukan Udemy Course Player yang siap.');
+  assertCoursePlayerReady(verified);
+  if (!/udemy\.com\/course\//i.test(verified.url)) throw new Error('Tab aktif bukan Udemy Course Player yang siap.');
   console.log(`Tab terverifikasi: ${verified.title}`);
 }
 

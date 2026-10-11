@@ -50,7 +50,13 @@ export function inspectPageHealthCode(lectureId: string | null): string {
 export function navigateCode(sectionIndex: number, lectureIndex: number, lectureId: string | null): string {
   const itemPurpose = `curriculum-item-${sectionIndex}-${lectureIndex}`;
   return `async (page) => {
-    await page.getByRole('tab', { name: 'Course content' }).first().evaluate(el => el.click());
+    const curriculum = page.locator('[data-purpose="curriculum-section-container"]').first();
+    if (!await curriculum.isVisible().catch(() => false)) {
+      let courseTab = page.getByRole('tab', { name: /^(?:Course content|Konten kursus)$/i }).first();
+      if (!await courseTab.count()) courseTab = page.locator('[role="tab"]').first();
+      await courseTab.evaluate(el => el.click());
+      await curriculum.waitFor({ state: 'visible', timeout: 10000 });
+    }
     const section = page.locator('[data-purpose="section-panel-${sectionIndex}"]:visible [data-purpose="section-heading"] button[aria-expanded="false"]').first();
     if (await section.count()) await section.evaluate(el => el.click());
     const item = page.locator('[data-purpose="${itemPurpose}"]:visible [data-purpose="item-title"]').first();

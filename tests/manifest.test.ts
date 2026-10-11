@@ -56,3 +56,37 @@ test('new curriculum items remain pending while valid old output is preserved', 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('stable IDs preserve checkpoint when Udemy localizes section labels', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'udemy-manifest-locale-test-'));
+  try {
+    await fs.writeFile(path.join(root, 'saved.md'), 'saved transcript');
+    const previous = manifest(lecture({ status: 'completed', outputFile: 'saved.md' }));
+    previous.sections[0].id = 'section-panel-0';
+    previous.sections[0].title = 'Bagian 1: One';
+    const fresh = manifest(lecture({ status: 'pending' }));
+    fresh.sections[0].id = 'section-panel-0';
+
+    const reconciled = await reconcileManifest(fresh, previous, root);
+    assert.equal(reconciled.sections[0].lectures[0].status, 'completed');
+    assert.equal(reconciled.sections[0].lectures[0].outputFile, 'saved.md');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('existing planned Markdown recovers a checkpoint lost from the manifest', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'udemy-manifest-disk-test-'));
+  try {
+    const fresh = manifest(lecture({ status: 'pending' }));
+    const expected = path.join(root, '1_One');
+    await fs.mkdir(expected, { recursive: true });
+    await fs.writeFile(path.join(expected, '1_Lecture.md'), 'saved transcript');
+
+    const reconciled = await reconcileManifest(fresh, manifest(lecture({ status: 'pending' })), root);
+    assert.equal(reconciled.sections[0].lectures[0].status, 'completed');
+    assert.equal(reconciled.sections[0].lectures[0].outputFile, path.join('1_One', '1_Lecture.md'));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
