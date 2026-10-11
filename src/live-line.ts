@@ -7,6 +7,9 @@ export class LiveLine {
   private ownedFd: number | null = null;
   private lastWidth = 0;
   private lastFallbackAt = 0;
+  private spinner: NodeJS.Timeout | null = null;
+  private spinnerLabel = '';
+  private spinnerFrame = 0;
 
   constructor(writer?: Writer) {
     if (writer) {
@@ -40,7 +43,29 @@ export class LiveLine {
     }
   }
 
+  startSpinner(label: string): void {
+    this.stopSpinner();
+    this.spinnerLabel = label;
+    const frames = ['|', '/', '-', '\\'];
+    const tick = () => {
+      const frame = frames[this.spinnerFrame++ % frames.length];
+      this.update(`      Transcript [${frame}] ${this.spinnerLabel}`);
+    };
+    tick();
+    this.spinner = setInterval(tick, 120);
+  }
+
+  setSpinnerLabel(label: string): void {
+    this.spinnerLabel = label;
+  }
+
+  stopSpinner(): void {
+    if (this.spinner) clearInterval(this.spinner);
+    this.spinner = null;
+  }
+
   finish(line: string): void {
+    this.stopSpinner();
     if (this.writer) this.writer(`\r${line.padEnd(this.lastWidth)}\n`);
     else console.log(line);
     if (this.ownedFd !== null) fs.closeSync(this.ownedFd);

@@ -130,9 +130,8 @@ function toMarkdown(html: string): string {
   return new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced' }).turndown(html).trim() + '\n';
 }
 
-async function extractVideoTranscript(): Promise<TextResult> {
-  const progressLine = new LiveLine();
-  activeTranscriptLine = progressLine;
+async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResult> {
+  progressLine.stopSpinner();
   const started = Date.now();
   const cues: TranscriptCue[] = [];
   let batchNumber = 0;
@@ -183,18 +182,16 @@ async function extractVideoTranscript(): Promise<TextResult> {
       reason: null
     };
   } catch (error) {
-    progressLine.finish(`      Transcript [gagal] ${String(error)}`);
-    activeTranscriptLine = null;
     throw error;
   }
 }
 
-async function extract(lecture: Lecture): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null }> {
+async function extract(lecture: Lecture, progressLine: LiveLine): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null }> {
   const types = lecture.type === 'unknown' ? (['article', 'video', 'resource'] as const) : [lecture.type];
   let retryReason: string | null = null;
   for (const type of types) {
     if (type === 'video') {
-      const result = await extractVideoTranscript();
+      const result = await extractVideoTranscript(progressLine);
       if (result.availability === 'retryable') {
         retryReason = result.reason ?? 'Transcript belum siap.';
         if (lecture.type !== 'unknown') throw new TransientContentError(retryReason);
@@ -436,6 +433,8 @@ async function main(): Promise<void> {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let stage: 'navigation' | 'attachments' | 'content' = 'navigation';
         try {
+          activeTranscriptLine ??= new LiveLine();
+          activeTranscriptLine.startSpinner(attempt === 1 ? 'Membuka lecture...' : `Mencoba ulang lecture (${attempt}/${maxAttempts})...`);
           const state = await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id));
           if (state.state === 'blocked') {
             await pause(1500);
@@ -446,12 +445,16 @@ async function main(): Promise<void> {
             throw new TransientNavigationError(`Navigasi lecture belum siap: ${state.evidence.join(', ') || 'course-player-or-url-not-ready'}`);
           }
           stage = 'attachments';
+          activeTranscriptLine.setSpinnerLabel('Memeriksa resource...');
           await syncAttachments(root, section, lecture, () => saveManifest(manifestFile, manifest));
           stage = 'content';
           if (lecture.status !== 'completed' && lecture.status !== 'unavailable' && lecture.status !== 'skipped') {
-            const result = await extract(lecture);
+            activeTranscriptLine.setSpinnerLabel(lecture.type === 'video' ? 'Menyiapkan transcript...' : 'Mengekstrak konten...');
+            const result = await extract(lecture, activeTranscriptLine);
             lecture.type = result.type;
             if (!result.content?.trim()) {
+              activeTranscriptLine?.finish(`      Transcript [tidak tersedia] ${result.reason ?? 'Konten tidak tersedia.'}`);
+              activeTranscriptLine = null;
               lecture.status = 'unavailable';
               lecture.reason = result.reason;
               lecture.outputFile = null;
@@ -473,20 +476,29 @@ async function main(): Promise<void> {
               } : null;
             }
           }
+          if (activeTranscriptLine) {
+            activeTranscriptLine.finish('      Lecture selesai.');
+            activeTranscriptLine = null;
+          }
           break;
         } catch (error) {
-          activeTranscriptLine?.finish(`      Transcript [gagal] ${String(error)}`);
-          activeTranscriptLine = null;
           failure = error;
           if (stage !== 'content') {
             lecture.attachmentReason = String(error);
             lecture.attachmentsScanned = false;
           }
-          if (error instanceof SecurityChallengeError) break;
+          if (error instanceof SecurityChallengeError) {
+            activeTranscriptLine?.finish(`      Transcript [diblokir] ${String(error)}`);
+            activeTranscriptLine = null;
+            break;
+          }
           if (attempt < maxAttempts && isRetryableLectureError(error)) {
+            activeTranscriptLine?.startSpinner(`Mencoba ulang setelah error (${attempt + 1}/${maxAttempts})...`);
             await selectUdemyTab(courseUrl);
             await pause(800 * attempt);
           } else {
+            activeTranscriptLine?.finish(`      Transcript [gagal] ${String(error)}`);
+            activeTranscriptLine = null;
             break;
           }
         }
