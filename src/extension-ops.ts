@@ -10,7 +10,17 @@ export function navigateCode(sectionIndex: number, lectureIndex: number, lecture
     ${lectureId
       ? `await page.waitForFunction((id) => location.pathname.includes('/lecture/' + id) && !document.querySelector('[class*="curriculum-item-view--loader"]'), '${lectureId}', { timeout: 15000 }).catch(() => {});`
       : `await page.waitForFunction(() => !document.querySelector('[class*="curriculum-item-view--loader"]'), undefined, { timeout: 8000 }).catch(() => {});`}
-    return { url: page.url(), challenge: await page.evaluate(() => /verify you are human|security challenge|captcha|access denied|unusual traffic/i.test(document.body.innerText)) };
+    const challenge = await page.evaluate(() => {
+      const url = location.href.toLowerCase();
+      const title = document.title.toLowerCase();
+      const text = document.body.innerText.trim();
+      const challengeElement = document.querySelector('iframe[src*="captcha"], iframe[src*="challenge"], [id*="captcha"], [data-testid*="captcha"], form[action*="challenge"]');
+      return /captcha|challenge|access-denied|blocked/.test(url)
+        || /verify you are human|security challenge|access denied|just a moment/.test(title)
+        || challengeElement !== null
+        || (text.length < 3000 && /verify you are human|security challenge|captcha|unusual traffic/.test(text.toLowerCase()));
+    });
+    return { url: page.url(), challenge };
   }`;
 }
 
