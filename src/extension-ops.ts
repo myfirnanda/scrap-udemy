@@ -67,6 +67,21 @@ export function navigateCode(sectionIndex: number, lectureIndex: number, lecture
   }`;
 }
 
+export function restoreLectureCode(lectureUrl: string, lectureId: string | null): string {
+  return `async (page) => {
+    await page.goto(${JSON.stringify(lectureUrl)}, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    let navigationReady = true;
+    try {
+      await page.locator('[data-purpose="curriculum-section-container"]').first().waitFor({ state: 'attached', timeout: 45000 });
+      ${lectureId
+        ? `await page.waitForFunction((id) => location.pathname.includes('/lecture/' + id) && !document.querySelector('[class*="curriculum-item-view--loader"]'), '${lectureId}', { timeout: 20000 });`
+        : ''}
+    } catch { navigationReady = false; }
+    ${inspectPageBody(lectureId)}
+    return { ...health, navigationReady };
+  }`;
+}
+
 function attachmentLocators(sectionIndex: number, lectureIndex: number): string {
   const itemPurpose = `curriculum-item-${sectionIndex}-${lectureIndex}`;
   return `

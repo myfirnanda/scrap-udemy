@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import TurndownService from 'turndown';
 import { attachExistingChrome, cli, runCode, runCodeFile } from './extension-cli.js';
-import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, type PageHealth } from './extension-ops.js';
+import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, restoreLectureCode, type PageHealth } from './extension-ops.js';
 import { courseFingerprint, findExistingCourse, isCourseComplete, loadManifest, plannedFile, reconcileManifest, saveManifest, type Attachment, type Lecture, type Manifest, type Section } from './manifest.js';
 import { writeMarkdown } from './markdown-writer.js';
 import { LiveLine } from './live-line.js';
@@ -61,6 +61,10 @@ function isRetryableLectureError(error: unknown): boolean {
   const message = String(error).toLowerCase();
   if (message.includes('security_challenge_detected')) return false;
   return /timeout|timed out|net::|network|connection|target page|browser has been closed|disconnected/.test(message);
+}
+
+function needsExtensionReconnect(error: unknown): boolean {
+  return /target page|browser has been closed|disconnected|no active browser session|session.*not found/i.test(String(error));
 }
 
 function parseOptions(args: string[]): { mode: Mode; output: string; courseUrl: string } {
@@ -437,8 +441,13 @@ async function main(): Promise<void> {
         let stage: 'navigation' | 'attachments' | 'content' = 'navigation';
         try {
           activeTranscriptLine ??= new LiveLine();
-          activeTranscriptLine.startSpinner(attempt === 1 ? 'Membuka lecture...' : `Mencoba ulang lecture (${attempt}/${maxAttempts})...`);
-          const state = await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id));
+          activeTranscriptLine.startSpinner(attempt === 1
+            ? 'Membuka lecture...'
+            : `Mengembalikan halaman lecture target (${attempt}/${maxAttempts})...`);
+          const lectureTarget = lecture.url ?? (lecture.id ? new URL(`lecture/${lecture.id}`, courseUrl).toString() : courseUrl);
+          const state = attempt === 1
+            ? await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id))
+            : await runCode<PageHealth>(restoreLectureCode(lectureTarget, lecture.id));
           if (state.state === 'blocked') {
             await pause(1500);
             const confirmed = await runCode<PageHealth>(inspectPageHealthCode(lecture.id));
@@ -497,7 +506,10 @@ async function main(): Promise<void> {
           }
           if (attempt < maxAttempts && isRetryableLectureError(error)) {
             activeTranscriptLine?.startSpinner(`Mencoba ulang setelah error (${attempt + 1}/${maxAttempts})...`);
-            await selectUdemyTab(courseUrl);
+            if (needsExtensionReconnect(error)) {
+              try { await selectUdemyTab(courseUrl); }
+              catch (reconnectError) { console.warn(`Pemulihan koneksi belum berhasil: ${String(reconnectError)}`); }
+            }
             await pause(800 * attempt);
           } else {
             activeTranscriptLine?.finish(`      Transcript [gagal] ${String(error)}`);
@@ -544,6 +556,8 @@ async function main(): Promise<void> {
 
 main().catch(error => {
   const message = (error as Error).message;
+  activeTranscriptLine?.finish(`      Transcript [gagal] ${message}`);
+  activeTranscriptLine = null;
   console.error(message);
   process.exitCode = message.includes('ZERO_CLICK_CONFIGURATION_REQUIRED') ? 4
     : error instanceof SecurityChallengeError ? 3 : 1;
