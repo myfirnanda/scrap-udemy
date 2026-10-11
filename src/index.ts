@@ -470,7 +470,7 @@ async function main(): Promise<void> {
             const confirmed = await runCode<PageHealth>(inspectPageHealthCode(lecture.id));
             if (confirmed.state === 'blocked') throw new SecurityChallengeError(confirmed.evidence);
           }
-          if (state.state !== 'ready' || state.navigationReady === false || (lecture.id && !state.url.includes(`/lecture/${lecture.id}`))) {
+          if (state.state !== 'ready' || (lecture.id && !state.url.includes(`/lecture/${lecture.id}`))) {
             throw new TransientNavigationError(`Navigasi lecture belum siap: ${state.evidence.join(', ') || 'course-player-or-url-not-ready'}`);
           }
           stage = 'attachments';

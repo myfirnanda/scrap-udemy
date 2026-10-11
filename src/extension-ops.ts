@@ -21,7 +21,7 @@ function inspectPageBody(lectureId: string | null): string {
       const url = new URL(location.href);
       const title = document.title.trim().toLowerCase();
       const text = document.body.innerText.trim();
-      const curriculum = [...document.querySelectorAll('[data-purpose="curriculum-section-container"]')].some(visible);
+      const curriculum = !!document.querySelector('[data-purpose="curriculum-section-container"]');
       const expectedLecture = !expectedId || url.pathname.includes('/lecture/' + expectedId);
       const challengeSelector = 'iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[src*="challenge"], [data-testid*="captcha"], form[action*="challenge"]';
       const decision = decidePageHealth({
@@ -65,8 +65,15 @@ export function navigateCode(sectionIndex: number, lectureIndex: number, lecture
     let navigationReady = true;
     try {
       ${lectureId
-        ? `await page.waitForFunction((id) => location.pathname.includes('/lecture/' + id) && !document.querySelector('[class*="curriculum-item-view--loader"]'), '${lectureId}', { timeout: 15000 });`
-        : `await page.waitForFunction(() => !document.querySelector('[class*="curriculum-item-view--loader"]'), undefined, { timeout: 8000 });`}
+        ? `await page.waitForFunction((id) => {
+            const loader = document.querySelector('[class*="curriculum-item-view--loader"]');
+            const loading = loader instanceof HTMLElement && loader.getClientRects().length > 0 && getComputedStyle(loader).visibility !== 'hidden';
+            return location.pathname.includes('/lecture/' + id) && !loading;
+          }, '${lectureId}', { timeout: 10000 });`
+        : `await page.waitForFunction(() => {
+            const loader = document.querySelector('[class*="curriculum-item-view--loader"]');
+            return !(loader instanceof HTMLElement) || loader.getClientRects().length === 0 || getComputedStyle(loader).visibility === 'hidden';
+          }, undefined, { timeout: 8000 });`}
     } catch { navigationReady = false; }
     ${inspectPageBody(lectureId)}
     return { ...health, navigationReady };
@@ -75,13 +82,17 @@ export function navigateCode(sectionIndex: number, lectureIndex: number, lecture
 
 export function restoreLectureCode(lectureUrl: string, lectureId: string | null): string {
   return `async (page) => {
-    await page.goto(${JSON.stringify(lectureUrl)}, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(${JSON.stringify(lectureUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 });
     let navigationReady = true;
     try {
-      await page.locator('[data-purpose="curriculum-section-container"]').first().waitFor({ state: 'attached', timeout: 45000 });
-      ${lectureId
-        ? `await page.waitForFunction((id) => location.pathname.includes('/lecture/' + id) && !document.querySelector('[class*="curriculum-item-view--loader"]'), '${lectureId}', { timeout: 20000 });`
-        : ''}
+      await page.waitForFunction((id) => {
+        const curriculum = document.querySelector('[data-purpose="curriculum-section-container"]');
+        if (!curriculum) return false;
+        ${lectureId ? `if (!location.pathname.includes('/lecture/' + id)) return false;` : ''}
+            const loader = document.querySelector('[class*="curriculum-item-view--loader"]');
+            const loading = loader instanceof HTMLElement && loader.getClientRects().length > 0 && getComputedStyle(loader).visibility !== 'hidden';
+        return !loading;
+      }, ${JSON.stringify(lectureId)}, { timeout: 10000 });
     } catch { navigationReady = false; }
     ${inspectPageBody(lectureId)}
     return { ...health, navigationReady };
@@ -92,7 +103,7 @@ function attachmentLocators(sectionIndex: number, lectureIndex: number): string 
   const itemPurpose = `curriculum-item-${sectionIndex}-${lectureIndex}`;
   return `
     const item = page.locator('[data-purpose="${itemPurpose}"]:visible').first();
-    const trigger = item.locator('button[aria-label="Resource list"], button:has-text("Resources")').first();
+    const trigger = item.locator('button[aria-label="Resource list"], button[aria-label="Daftar sumber daya"], button:has-text("Resources"), button:has-text("Sumber Daya")').first();
     if (!await trigger.count()) return [];
     const resourceBox = trigger.locator('xpath=..');
     const links = resourceBox.locator('li a[href], li button, [role="listitem"] a[href], [role="listitem"] button, [role="listitem"] [role="button"]');
