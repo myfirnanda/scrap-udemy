@@ -7,8 +7,9 @@ export function navigateCode(sectionIndex: number, lectureIndex: number, lecture
     const item = page.locator('[data-purpose="${itemPurpose}"]:visible [data-purpose="item-title"]').first();
     await item.waitFor({ state: 'visible', timeout: 10000 });
     await item.evaluate(el => el.click());
-    ${lectureId ? `await page.waitForURL(url => url.pathname.includes('/lecture/${lectureId}'), { timeout: 15000 });` : `await page.waitForTimeout(500);`}
-    await page.waitForFunction(() => !document.querySelector('[class*="curriculum-item-view--loader"]'), undefined, { timeout: 15000 }).catch(() => {});
+    ${lectureId
+      ? `await page.waitForFunction((id) => location.pathname.includes('/lecture/' + id) && !document.querySelector('[class*="curriculum-item-view--loader"]'), '${lectureId}', { timeout: 15000 }).catch(() => {});`
+      : `await page.waitForFunction(() => !document.querySelector('[class*="curriculum-item-view--loader"]'), undefined, { timeout: 8000 }).catch(() => {});`}
     return { url: page.url(), challenge: await page.evaluate(() => /verify you are human|security challenge|captcha|access denied|unusual traffic/i.test(document.body.innerText)) };
   }`;
 }

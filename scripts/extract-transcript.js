@@ -27,7 +27,20 @@ async (page) => {
       el.scrollTop = Math.min(el.scrollTop + Math.max(200, el.clientHeight * .7), el.scrollHeight);
       return { moved: el.scrollTop > old, end: el.scrollTop >= el.scrollHeight - el.clientHeight - 2, height: el.scrollHeight };
     });
-    await page.waitForTimeout(150);
+    // Udemy renders transcript cues lazily after scrolling. Poll for a stable
+    // DOM instead of always sleeping the full 150 ms.
+    let stable = 0;
+    let previousCount = -1;
+    let previousHeight = -1;
+    for (let wait = 0; wait < 150 && stable < 2; wait += 25) {
+      await page.waitForTimeout(25);
+      const count = await panel.locator('[data-purpose="cue-text"]').count();
+      const height = await scroll.evaluate(el => el.scrollHeight);
+      if (count === previousCount && height === previousHeight) stable++;
+      else stable = 0;
+      previousCount = count;
+      previousHeight = height;
+    }
     endStable = state.end && !state.moved && state.height === lastHeight ? endStable + 1 : 0;
     lastHeight = state.height;
     if (endStable >= 3) break;

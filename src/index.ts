@@ -39,6 +39,12 @@ function lectureAttempts(): number {
   return value;
 }
 
+function isRetryableLectureError(error: unknown): boolean {
+  const message = String(error).toLowerCase();
+  if (message.includes('security_challenge_detected')) return false;
+  return /timeout|timed out|net::|network|connection|target page|browser has been closed|disconnected/.test(message);
+}
+
 function parseOptions(args: string[]): { mode: Mode; output: string; courseUrl: string } {
   const mode = (args[0] ?? 'all') as Mode;
   if (!['lecture', 'section', 'all'].includes(mode)) throw new Error('Mode harus lecture, section, atau all.');
@@ -361,9 +367,11 @@ async function main(): Promise<void> {
           lecture.attachmentReason = String(error);
           lecture.attachmentsScanned = false;
           if (String(error).includes('SECURITY_CHALLENGE_DETECTED')) break;
-          if (attempt < maxAttempts) {
+          if (attempt < maxAttempts && isRetryableLectureError(error)) {
             await selectUdemyTab(courseUrl);
             await pause(800 * attempt);
+          } else {
+            break;
           }
         }
       }

@@ -135,5 +135,10 @@ export function plannedFile(section: Section, lecture: Lecture): string {
 }
 
 export async function saveManifest(file: string, manifest: Manifest): Promise<void> {
+  const serialized = JSON.stringify(manifest);
+  if (lastManifestWrites.get(file) === serialized) return;
   await writeJsonAtomic(file, manifest);
+  lastManifestWrites.set(file, serialized);
 }
+
+const lastManifestWrites = new Map<string, string>();
