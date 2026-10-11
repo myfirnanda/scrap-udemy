@@ -77,9 +77,11 @@ Repository GitHub bersifat private, jadi akun GitHub yang melakukan clone harus 
 
    ```dotenv
    PLAYWRIGHT_MCP_EXTENSION_TOKEN=tempel-token-di-sini
+   PLAYWRIGHT_MCP_PROFILE_DIR_NAME=Default
    ```
 
 Token menghubungkan Playwright CLI ke extension tanpa dialog **Allow & select** pada setiap koneksi normal. Jangan commit atau membagikan token tersebut.
+`PLAYWRIGHT_MCP_PROFILE_DIR_NAME` adalah nama profil dari `chrome://version`, bukan path folder. Nilai Chrome standar biasanya `Default`.
 
 ## Penggunaan
 

@@ -25,24 +25,32 @@ async (page) => {
   if (isArabic(originalSample)) {
     const captions = page.locator('[data-purpose="captions-dropdown-button"]');
     if (!await captions.count()) return { availability: 'retryable', reason: 'Transcript berbahasa Arab, tetapi menu caption tidak ditemukan.' };
-    if (await captions.getAttribute('aria-expanded') !== 'true') await captions.click({ force: true });
-    await page.waitForTimeout(200);
-    let options = page.locator('[role="menuitemradio"]:visible');
-    let labels = await options.allTextContents();
     const englishNames = ['english', 'inggris', 'anglais', 'englisch', 'ingl\u00e9s', 'inglese', 'ingl\u00eas', 'ingilizce', 'engels', 'engelsk', 'angielski', '\u0627\u0644\u0625\u0646\u062c\u0644\u064a\u0632\u064a\u0629', '\u82f1\u8bed', '\u82f1\u6587', '\u82f1\u8a9e', '\uc601\uc5b4'];
-    let englishIndex = labels.findIndex(label => englishNames.some(name => label.trim().toLocaleLowerCase().startsWith(name)));
+    let options = page.locator('[role="menuitemradio"]:visible');
+    let labels = [];
+    let englishIndex = -1;
+    for (let menuAttempt = 0; menuAttempt < 2 && englishIndex < 0; menuAttempt++) {
+      if (!await options.count()) await captions.evaluate(el => el.click());
+      await options.first().waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
+      labels = await options.allTextContents();
+      englishIndex = labels.findIndex(label => englishNames.some(name => label.trim().toLocaleLowerCase().startsWith(name)));
+      if (englishIndex < 0 && await options.count()) {
+        await captions.evaluate(el => el.click());
+        await page.waitForTimeout(100);
+      }
+    }
     if (englishIndex < 0) {
       const more = page.locator('[data-purpose="caption-more"]:visible');
       if (await more.count()) {
         await more.click({ force: true });
-        await page.waitForTimeout(200);
+        await options.first().waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
         options = page.locator('[role="menuitemradio"]:visible');
         labels = await options.allTextContents();
         englishIndex = labels.findIndex(label => englishNames.some(name => label.trim().toLocaleLowerCase().startsWith(name)));
       }
     }
     if (englishIndex < 0) return { availability: 'retryable', reason: 'Transcript berbahasa Arab dan caption English tidak tersedia.' };
-    await options.nth(englishIndex).click({ force: true });
+    await options.nth(englishIndex).evaluate(el => el.click());
     await page.waitForFunction(previous => {
       const current = [...document.querySelectorAll('[data-purpose="cue-text"]')].slice(0, 20).map(node => node.textContent || '').join(' ');
       return current.trim().length > 0 && current !== previous;

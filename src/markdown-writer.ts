@@ -8,4 +8,5 @@ export async function writeMarkdown(root: string, relative: string, content: str
   const temporary = `${file}.${process.pid}.tmp`;
   await fs.writeFile(temporary, content.replace(/\r\n/g, '\n').trimEnd() + '\n', 'utf8');
   await fs.rename(temporary, file);
+  await fs.rm(`${file}.arabic.pending`, { force: true });
 }

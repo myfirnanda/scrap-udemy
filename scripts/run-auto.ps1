@@ -25,6 +25,11 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $queueStateFile = Join-Path $logDir 'queue-state.json'
 $problemReportFile = Join-Path $logDir 'problem-courses.json'
 
+if (Test-Path -LiteralPath $queueStateFile) {
+  & node.exe --import tsx src/audit-existing-transcripts.ts "--queue-state=$queueStateFile" "--output=$(Join-Path $projectRoot 'output')"
+  if ($LASTEXITCODE -ne 0) { throw 'Audit transcript lama gagal; queue tidak dijalankan.' }
+}
+
 function Save-JsonAtomic {
   param([string]$Path, [object]$Value)
   $temp = "$Path.$PID.tmp"
