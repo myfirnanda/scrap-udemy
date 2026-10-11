@@ -20,6 +20,7 @@ type QueueState = {
 export type ArabicAuditResult = {
   transcriptsInvalidated: number;
   coursesRequeued: number;
+  replacedBackupsRemoved: number;
 };
 
 function courseKey(value: string): string | null {
@@ -39,6 +40,7 @@ export async function auditExistingArabicTranscripts(queueStateFile: string, out
     throw error;
   });
   let transcriptsInvalidated = 0;
+  let replacedBackupsRemoved = 0;
   const requeued = new Set<QueueCourse>();
 
   for (const entry of entries) {
@@ -63,7 +65,12 @@ export async function auditExistingArabicTranscripts(queueStateFile: string, out
           if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
           throw error;
         }
-        if (!isArabicTranscript(content)) continue;
+        if (!isArabicTranscript(content)) {
+          const oldArabicBackup = `${transcriptFile}.arabic.pending`;
+          try { await fs.unlink(oldArabicBackup); replacedBackupsRemoved++; }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+          continue;
+        }
         const backupFile = `${transcriptFile}.arabic.pending`;
         await fs.rename(transcriptFile, backupFile);
         lecture.status = 'pending';
@@ -91,7 +98,7 @@ export async function auditExistingArabicTranscripts(queueStateFile: string, out
     queue.updatedAt = new Date().toISOString();
     await writeJsonAtomic(queueStateFile, queue);
   }
-  return { transcriptsInvalidated, coursesRequeued: requeued.size };
+  return { transcriptsInvalidated, coursesRequeued: requeued.size, replacedBackupsRemoved };
 }
 
 async function main(): Promise<void> {

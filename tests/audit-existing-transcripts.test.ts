@@ -30,7 +30,7 @@ test('existing Arabic transcript is removed from Markdown output and its queued 
     const result = await auditExistingArabicTranscripts(queueFile, output);
     const updatedManifest = JSON.parse(await fs.readFile(path.join(courseRoot, 'course_manifest.json'), 'utf8')) as Manifest;
     const updatedQueue = JSON.parse(await fs.readFile(queueFile, 'utf8')) as { courses: Array<{ Status: string }> };
-    assert.deepEqual(result, { transcriptsInvalidated: 1, coursesRequeued: 1 });
+    assert.deepEqual(result, { transcriptsInvalidated: 1, coursesRequeued: 1, replacedBackupsRemoved: 0 });
     assert.equal(updatedManifest.sections[0].lectures[0].status, 'pending');
     assert.equal(updatedManifest.sections[0].lectures[0].outputFile, null);
     assert.equal(updatedManifest.completedAt, null);
