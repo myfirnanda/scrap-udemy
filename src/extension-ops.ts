@@ -107,12 +107,19 @@ export function downloadAttachmentCode(sectionIndex: number, lectureIndex: numbe
     ${attachmentLocators(sectionIndex, lectureIndex)}
     const attachment = resources.find(item => item.sourceIndex === ${sourceIndex});
     if (!attachment) throw new Error('Attachment tidak lagi ditemukan pada Resource list.');
+    // The resource list can initially render an item as a button and hydrate it
+    // into an external anchor shortly afterwards. Always trust the latest DOM
+    // inspection before waiting for a browser download event.
+    if (attachment.kind === 'external' && attachment.href) {
+      return { kind: 'external', url: attachment.href, reason: 'Tautan eksternal disimpan sebagai resource.' };
+    }
     const startUrl = page.url();
-    const downloadPromise = page.waitForEvent('download', { timeout: 30000 }).then(download => ({ kind: 'download', download })).catch(() => ({ kind: 'none' }));
-    const popupPromise = page.context().waitForEvent('page', { timeout: 30000 }).then(popup => ({ kind: 'external', popup })).catch(() => ({ kind: 'none' }));
-    const navigationPromise = page.waitForURL(url => url.href !== startUrl, { timeout: 30000 }).then(() => ({ kind: 'navigation', url: page.url() })).catch(() => ({ kind: 'none' }));
+    const eventTimeout = 15000;
+    const downloadPromise = page.waitForEvent('download', { timeout: eventTimeout }).then(download => ({ kind: 'download', download })).catch(() => ({ kind: 'none' }));
+    const popupPromise = page.context().waitForEvent('page', { timeout: eventTimeout }).then(popup => ({ kind: 'external', popup })).catch(() => ({ kind: 'none' }));
+    const navigationPromise = page.waitForURL(url => url.href !== startUrl, { timeout: eventTimeout }).then(() => ({ kind: 'navigation', url: page.url() })).catch(() => ({ kind: 'none' }));
     await links.nth(attachment.sourceIndex).click({ force: true });
-    const event = await Promise.race([downloadPromise, popupPromise, navigationPromise, page.waitForTimeout(30000).then(() => ({ kind: 'none' }))]);
+    const event = await Promise.race([downloadPromise, popupPromise, navigationPromise, page.waitForTimeout(eventTimeout).then(() => ({ kind: 'none' }))]);
     if (event.kind === 'external') {
       await event.popup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
       const url = event.popup.url();
