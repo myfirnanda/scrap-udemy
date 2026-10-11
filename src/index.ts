@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import TurndownService from 'turndown';
 import { attachExistingChrome, cli, runCode, runCodeFile } from './extension-cli.js';
-import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, restoreLectureCode, type PageHealth } from './extension-ops.js';
+import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, normalCoursePlayerUrl, restoreLectureCode, type PageHealth } from './extension-ops.js';
 import { courseFingerprint, findExistingCourse, isCourseComplete, loadManifest, plannedFile, reconcileManifest, saveManifest, type Attachment, type Lecture, type Manifest, type Section } from './manifest.js';
 import { writeMarkdown } from './markdown-writer.js';
 import { LiveLine } from './live-line.js';
@@ -459,12 +459,13 @@ async function main(): Promise<void> {
         try {
           activeTranscriptLine ??= new LiveLine();
           activeTranscriptLine.startSpinner(attempt === 1
-            ? 'Membuka lecture...'
+            ? lecture.isLab ? 'Membuka Lab di Course Player normal...' : 'Membuka lecture...'
             : `Mengembalikan halaman lecture target (${attempt}/${maxAttempts})...`);
           const lectureTarget = lecture.url ?? (lecture.id ? new URL(`lecture/${lecture.id}`, courseUrl).toString() : courseUrl);
-          const state = attempt === 1
+          const targetUrl = lecture.isLab ? normalCoursePlayerUrl(lectureTarget) : lectureTarget;
+          const state = attempt === 1 && !lecture.isLab
             ? await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id))
-            : await runCode<PageHealth>(restoreLectureCode(lectureTarget, lecture.id));
+            : await runCode<PageHealth>(restoreLectureCode(targetUrl, lecture.id));
           if (state.state === 'blocked') {
             await pause(1500);
             const confirmed = await runCode<PageHealth>(inspectPageHealthCode(lecture.id));

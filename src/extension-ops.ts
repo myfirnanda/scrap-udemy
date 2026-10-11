@@ -7,6 +7,13 @@ export interface PageHealth {
   navigationReady?: boolean;
 }
 
+export function normalCoursePlayerUrl(lectureUrl: string): string {
+  const url = new URL(lectureUrl);
+  url.searchParams.set('udFrontends', 'false');
+  url.searchParams.delete('cteMode');
+  return url.toString();
+}
+
 function inspectPageBody(lectureId: string | null): string {
   return `
     const expectedLectureId = ${JSON.stringify(lectureId)};

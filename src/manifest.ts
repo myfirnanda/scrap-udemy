@@ -26,6 +26,7 @@ export interface Lecture {
   reason: string | null;
   outputFile: string | null;
   id: string | null;
+  isLab?: boolean;
   hasResources?: boolean;
   attachmentsScanned?: boolean;
   attachmentReason?: string | null;

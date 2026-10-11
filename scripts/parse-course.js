@@ -18,13 +18,14 @@ async (page) => {
       const title = raw.replace(/^\d+\.\s*/, '');
       const icons = [...item.querySelectorAll('svg use')].map(icon => icon.getAttribute('href') ?? icon.getAttribute('xlink:href'));
       const id = item.querySelector('[data-purpose="progress-toggle-button"]')?.getAttribute('aria-describedby')?.match(/(\d+)$/)?.[1] ?? null;
+      const isLab = !!item.querySelector('[data-purpose="lab-ribbon"]');
       let type = 'unknown';
       if (/quiz|practice test/i.test(title)) type = 'quiz';
       else if (/coding exercise|assignment|role play/i.test(title)) type = 'exercise';
       else if (icons.includes('#icon-video')) type = 'video';
       else if (icons.includes('#icon-article')) type = /resource|download|source code/i.test(title) ? 'resource' : 'article';
       const hasResources = !!item.querySelector('button[aria-label="Resource list"], button[data-purpose*="resource"], button[class*="resource"]');
-      return { number: lectureIndex + 1, title, type, id, url: id ? new URL(`lecture/${id}`, location.href.replace(/\/learn\/.*/, '/learn/')).href : null, status: 'pending', reason: null, outputFile: null, hasResources, attachmentsScanned: !hasResources, attachmentReason: null, attachments: [] };
+      return { number: lectureIndex + 1, title, type, id, url: id ? new URL(`lecture/${id}`, location.href.replace(/\/learn\/.*/, '/learn/')).href : null, status: 'pending', reason: null, outputFile: null, isLab, hasResources, attachmentsScanned: !hasResources, attachmentReason: null, attachments: [] };
     });
     return { number: sectionIndex + 1, title, id: section.getAttribute('data-purpose'), lectures };
   }));
