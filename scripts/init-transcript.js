@@ -1,4 +1,8 @@
 async (page) => {
+  await page.evaluate(() => {
+    const video = document.querySelector('video');
+    if (video instanceof HTMLVideoElement) video.pause();
+  });
   const panel = page.locator('[data-purpose="transcript-panel"]');
   if (!await panel.isVisible().catch(() => false)) {
     await page.evaluate(() => window.scrollTo(0, 0));

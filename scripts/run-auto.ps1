@@ -134,11 +134,16 @@ for ($courseIndex = 0; $courseIndex -lt $courseQueue.Count; $courseIndex++) {
     $passLog = Join-Path $logDir ("queue-{0}-{1}-course-{2:D2}-{3}-pass-{4}.log" -f $stamp, $PID, $courseNumber, $courseSlug, $pass)
     Write-Host ("Pass {0}/{1}; log: {2}" -f $pass, $maxPasses, $passLog)
     $previousErrorActionPreference = $ErrorActionPreference
+    $previousRunLogFile = $env:RUN_LOG_FILE
     $ErrorActionPreference = 'Continue'
+    New-Item -ItemType File -Path $passLog -Force | Out-Null
+    $env:RUN_LOG_FILE = $passLog
     try {
-      & node.exe --import tsx src/index.ts all "--course-url=$courseUrl" 2>&1 | Tee-Object -FilePath $passLog
+      & node.exe --import tsx src/index.ts all "--course-url=$courseUrl"
       $lastResult = $LASTEXITCODE
     } finally {
+      if ($null -eq $previousRunLogFile) { Remove-Item Env:RUN_LOG_FILE -ErrorAction SilentlyContinue }
+      else { $env:RUN_LOG_FILE = $previousRunLogFile }
       $ErrorActionPreference = $previousErrorActionPreference
     }
     $courseEntry.LastExitCode = $lastResult

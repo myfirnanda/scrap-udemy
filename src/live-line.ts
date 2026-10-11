@@ -1,10 +1,7 @@
-import fs from 'node:fs';
-
 type Writer = (value: string) => void;
 
 export class LiveLine {
   private writer: Writer | null = null;
-  private ownedFd: number | null = null;
   private lastWidth = 0;
   private lastFallbackAt = 0;
   private spinner: NodeJS.Timeout | null = null;
@@ -19,14 +16,6 @@ export class LiveLine {
     if (process.stdout.isTTY) {
       this.writer = value => process.stdout.write(value);
       return;
-    }
-    if (process.platform === 'win32') {
-      try {
-        this.ownedFd = fs.openSync('CONOUT$', 'w');
-        this.writer = value => fs.writeSync(this.ownedFd!, value);
-      } catch {
-        this.ownedFd = null;
-      }
     }
   }
 
@@ -68,8 +57,6 @@ export class LiveLine {
     this.stopSpinner();
     if (this.writer) this.writer(`\r${line.padEnd(this.lastWidth)}\n`);
     else console.log(line);
-    if (this.ownedFd !== null) fs.closeSync(this.ownedFd);
     this.writer = null;
-    this.ownedFd = null;
   }
 }

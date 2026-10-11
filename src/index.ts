@@ -6,8 +6,11 @@ import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode,
 import { courseFingerprint, findExistingCourse, isCourseComplete, loadManifest, plannedFile, reconcileManifest, saveManifest, type Attachment, type Lecture, type Manifest, type Section } from './manifest.js';
 import { writeMarkdown } from './markdown-writer.js';
 import { LiveLine } from './live-line.js';
+import { installConsoleLogFile } from './logging.js';
 import { appendTranscriptCues, transcriptCompletedLine, transcriptPercent, transcriptProgressLine, type TranscriptBatch, type TranscriptCue } from './transcript-progress.js';
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
+
+installConsoleLogFile(process.env.RUN_LOG_FILE);
 
 type Mode = 'lecture' | 'section' | 'all';
 type Availability = 'available' | 'unavailable' | 'retryable';
