@@ -91,6 +91,16 @@ async function selectUdemyTab(courseUrl: string, allowReconnect = true): Promise
     await attachExistingChrome();
     return selectUdemyTab(courseUrl, false);
   }
+  const expectedSlug = new URL(courseUrl).pathname.match(/^\/course\/([^/]+)/)?.[1];
+  const currentSlug = new URL(verified.url).pathname.match(/^\/course\/([^/]+)/)?.[1];
+  if (!verified.curriculum || currentSlug !== expectedSlug) {
+    const target = JSON.stringify(courseUrl);
+    verified = await runCode<{ url: string; title: string; curriculum: boolean }>(`async (page) => {
+      await page.goto(${target}, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.locator('[data-purpose="curriculum-section-container"]').first().waitFor({ state: 'attached', timeout: 30000 });
+      return page.evaluate(() => ({ url: location.href, title: document.title, curriculum: !!document.querySelector('[data-purpose="curriculum-section-container"]') }));
+    }`, 120_000);
+  }
   if (!verified.curriculum || !/udemy\.com\/course\//i.test(verified.url)) throw new Error('Tab aktif bukan Udemy Course Player yang siap.');
   console.log(`Tab terverifikasi: ${verified.title}`);
 }

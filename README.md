@@ -12,6 +12,7 @@ Automasi menggunakan Chrome yang sudah login, Playwright CLI, dan [Playwright Ex
 - Banyak attachment dalam satu lecture dapat diunduh.
 - Link eksternal disimpan terpisah dalam `00_EXTERNAL_RESOURCES.md`.
 - Struktur output mengikuti course, section, dan lecture.
+- Beberapa URL dapat dimasukkan ke queue dan diproses berurutan.
 - Mendukung course dengan lebih dari satu instructor.
 - Fingerprint mencegah pemrosesan ulang course yang sudah lengkap.
 - Checkpoint memungkinkan proses dilanjutkan setelah terputus.
@@ -22,22 +23,25 @@ Automasi menggunakan Chrome yang sudah login, Playwright CLI, dan [Playwright Ex
 
 ```mermaid
 flowchart TD
-    A["npm start"] --> B["Masukkan URL course"]
+    A["npm start"] --> B["Tambahkan satu atau beberapa URL"]
     B --> C{"URL valid?"}
     C -->|Tidak| B
-    C -->|Ya| D["Hubungkan Playwright Extension"]
-    D --> E["Verifikasi Course Player"]
-    E --> F["Baca judul, instructor, dan curriculum"]
-    F --> G{"Fingerprint sudah lengkap?"}
-    G -->|Ya| H["Berhenti: course sudah diproses"]
-    G -->|Tidak| I["Gabungkan curriculum dengan checkpoint"]
+    C -->|Ya| D["Tekan Enter kosong untuk mulai queue"]
+    D --> E["Hubungkan Playwright Extension"]
+    E --> F["Verifikasi Course Player"]
+    F --> G["Baca judul, instructor, dan curriculum"]
+    G --> H{"Fingerprint sudah lengkap?"}
+    H -->|Ya| O
+    H -->|Tidak| I["Gabungkan curriculum dengan checkpoint"]
     I --> J["Buka lecture berikutnya"]
     J --> K["Simpan attachment atau link eksternal"]
     K --> L["Simpan transcript/article/resource teks"]
     L --> M["Perbarui manifest dan log"]
     M --> N{"Masih ada item?"}
     N -->|Ya| J
-    N -->|Tidak| O["Tandai selesai dan keluar"]
+    N -->|Tidak| O{"Masih ada course di queue?"}
+    O -->|Ya| E
+    O -->|Tidak| P["Tampilkan ringkasan dan keluar"]
 ```
 
 ## Persyaratan
@@ -81,11 +85,19 @@ Jalankan:
 npm start
 ```
 
-Masukkan URL ketika terminal meminta:
+Tambahkan URL satu per satu. Setelah seluruh URL masuk, tekan **Enter** pada input kosong untuk mulai:
 
 ```text
-Masukkan URL course Udemy: https://www.udemy.com/course/course-slug/
+URL course #1 (kosong = mulai): https://www.udemy.com/course/course-pertama/
+Ditambahkan. Total queue: 1
+URL course #2 (kosong = mulai): https://www.udemy.com/course/course-kedua/
+Ditambahkan. Total queue: 2
+URL course #3 (kosong = mulai):
 ```
+
+Queue diproses secara berurutan agar transcript dan resource tidak tertukar. Setelah course pertama selesai, scraper otomatis membuka course kedua pada tab Course Player yang sama. URL duplikat tidak ditambahkan dua kali.
+
+Jika satu course belum tuntas setelah seluruh percobaan, checkpoint-nya tetap tersimpan dan scraper melanjutkan course berikutnya. CAPTCHA atau token extension yang tidak tersedia akan menghentikan seluruh queue karena keduanya memerlukan tindakan pengguna.
 
 Format yang diterima:
 
@@ -130,11 +142,11 @@ output/
 - Resource selalu berada di dalam section dan folder lecture pemiliknya.
 - `course_manifest.json` menyimpan fingerprint, status, lokasi file, dan checkpoint.
 - `_debug/` menyimpan screenshot dan HTML ketika lecture gagal.
-- `logs/` pada root project menyimpan output setiap auto pass.
+- `logs/` pada root project menyimpan output setiap course dan pass dalam queue.
 
 ## Checkpoint, resume, dan fingerprint
 
-Jika terminal, Chrome, jaringan, atau extension terputus, jalankan `npm start` kembali dan masukkan URL yang sama.
+Jika terminal, Chrome, jaringan, atau extension terputus, jalankan `npm start` kembali dan masukkan kembali URL course yang belum selesai. Checkpoint course tetap digunakan.
 
 Saat resume, scraper akan:
 
