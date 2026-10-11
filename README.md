@@ -116,7 +116,7 @@ Transcript [##########----------] ~50% | ~9:44/19:29 | 271 cue | batch 3 | 0:28
 Transcript [####################] 100% | 271 cue | tersimpan
 ```
 
-Persentase bertanda `~` adalah estimasi posisi panel transcript terhadap durasi video. Nilainya dapat diam sementara ketika Udemy menambah tinggi panel secara dinamis; nomor batch, jumlah cue, dan waktu berjalan tetap menunjukkan proses masih aktif. Angka `100%` hanya ditampilkan setelah Markdown berhasil disimpan.
+Progress diperbarui pada satu baris terminal yang sama agar output tidak memenuhi layar. Persentase bertanda `~` adalah estimasi posisi panel transcript terhadap durasi video. Nilainya dapat diam sementara ketika Udemy menambah tinggi panel secara dinamis; nomor batch, jumlah cue, dan waktu berjalan tetap menunjukkan proses masih aktif. Angka `100%` hanya ditampilkan setelah Markdown berhasil disimpan.
 
 Queue diproses secara berurutan agar transcript dan resource tidak tertukar. Setelah course pertama selesai, scraper otomatis membuka course kedua pada tab Course Player yang sama. URL duplikat tidak ditambahkan dua kali.
 

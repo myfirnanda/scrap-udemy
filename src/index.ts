@@ -5,6 +5,7 @@ import { attachExistingChrome, cli, runCode, runCodeFile } from './extension-cli
 import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, type PageHealth } from './extension-ops.js';
 import { courseFingerprint, findExistingCourse, isCourseComplete, loadManifest, plannedFile, reconcileManifest, saveManifest, type Attachment, type Lecture, type Manifest, type Section } from './manifest.js';
 import { writeMarkdown } from './markdown-writer.js';
+import { LiveLine } from './live-line.js';
 import { appendTranscriptCues, transcriptCompletedLine, transcriptPercent, transcriptProgressLine, type TranscriptBatch, type TranscriptCue } from './transcript-progress.js';
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
 
@@ -23,6 +24,8 @@ class SecurityChallengeError extends Error {
 
 class TransientNavigationError extends Error {}
 class TransientContentError extends Error {}
+
+let activeTranscriptLine: LiveLine | null = null;
 
 function loadLocalEnv(): void {
   try { process.loadEnvFile(path.resolve('.env')); }
@@ -128,42 +131,62 @@ function toMarkdown(html: string): string {
 }
 
 async function extractVideoTranscript(): Promise<TextResult> {
+  const progressLine = new LiveLine();
+  activeTranscriptLine = progressLine;
   const started = Date.now();
   const cues: TranscriptCue[] = [];
   let batchNumber = 0;
   let totalSteps = 0;
   let percent = 0;
   let duration: number | null | undefined;
-  console.log('      Transcript [menyiapkan] membuka panel dan membaca durasi video...');
-  let batch = await runCodeFile<TranscriptBatch>('scripts/init-transcript.js');
-  if (batch.availability !== 'available') return { content: null, availability: batch.availability, reason: batch.reason };
-  appendTranscriptCues(cues, batch.cues ?? []);
-  duration = batch.duration;
-  console.log(transcriptProgressLine(transcriptPercent(batch, percent), cues.length, batchNumber, (Date.now() - started) / 1000, duration));
-
-  while (!batch.complete && totalSteps < 1000) {
-    batch = await runCodeFile<TranscriptBatch>('scripts/extract-transcript.js');
-    if (batch.availability !== 'available') return { content: null, availability: batch.availability, reason: batch.reason };
-    batchNumber++;
-    totalSteps += batch.steps ?? 0;
+  try {
+    progressLine.update('      Transcript [menyiapkan] membuka panel dan membaca durasi video...');
+    let batch = await runCodeFile<TranscriptBatch>('scripts/init-transcript.js');
+    if (batch.availability !== 'available') {
+      progressLine.finish(`      Transcript [tidak tersedia] ${batch.reason ?? 'Panel transcript tidak tersedia.'}`);
+      activeTranscriptLine = null;
+      return { content: null, availability: batch.availability, reason: batch.reason };
+    }
     appendTranscriptCues(cues, batch.cues ?? []);
-    duration = batch.duration ?? duration;
-    const measuredPercent = transcriptPercent(batch, percent);
-    const nextPercent = batch.complete ? 99 : measuredPercent;
-    if (nextPercent !== null) percent = nextPercent;
-    console.log(transcriptProgressLine(nextPercent, cues.length, batchNumber, (Date.now() - started) / 1000, duration));
-  }
+    duration = batch.duration;
+    progressLine.update(transcriptProgressLine(transcriptPercent(batch, percent), cues.length, batchNumber, (Date.now() - started) / 1000, duration));
 
-  if (!batch.complete) throw new TransientContentError('Transcript belum mencapai akhir setelah 1000 scroll.');
-  if (!cues.length) return { content: null, availability: 'unavailable', reason: 'Panel transcript tersedia tetapi tidak memiliki cue.' };
-  return {
-    content: cues.map(cue => cue.text).join('\n\n') + '\n',
-    cueCount: cues.length,
-    firstCue: cues[0]?.text ?? null,
-    lastCue: cues.at(-1)?.text ?? null,
-    availability: 'available',
-    reason: null
-  };
+    while (!batch.complete && totalSteps < 1000) {
+      batch = await runCodeFile<TranscriptBatch>('scripts/extract-transcript.js');
+      if (batch.availability !== 'available') {
+        progressLine.finish(`      Transcript [tidak tersedia] ${batch.reason ?? 'Panel transcript tidak tersedia.'}`);
+        activeTranscriptLine = null;
+        return { content: null, availability: batch.availability, reason: batch.reason };
+      }
+      batchNumber++;
+      totalSteps += batch.steps ?? 0;
+      appendTranscriptCues(cues, batch.cues ?? []);
+      duration = batch.duration ?? duration;
+      const measuredPercent = transcriptPercent(batch, percent);
+      const nextPercent = batch.complete ? 99 : measuredPercent;
+      if (nextPercent !== null) percent = nextPercent;
+      progressLine.update(transcriptProgressLine(nextPercent, cues.length, batchNumber, (Date.now() - started) / 1000, duration));
+    }
+
+    if (!batch.complete) throw new TransientContentError('Transcript belum mencapai akhir setelah 1000 scroll.');
+    if (!cues.length) {
+      progressLine.finish('      Transcript [tidak tersedia] Panel transcript tidak memiliki cue.');
+      activeTranscriptLine = null;
+      return { content: null, availability: 'unavailable', reason: 'Panel transcript tersedia tetapi tidak memiliki cue.' };
+    }
+    return {
+      content: cues.map(cue => cue.text).join('\n\n') + '\n',
+      cueCount: cues.length,
+      firstCue: cues[0]?.text ?? null,
+      lastCue: cues.at(-1)?.text ?? null,
+      availability: 'available',
+      reason: null
+    };
+  } catch (error) {
+    progressLine.finish(`      Transcript [gagal] ${String(error)}`);
+    activeTranscriptLine = null;
+    throw error;
+  }
 }
 
 async function extract(lecture: Lecture): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null }> {
@@ -435,7 +458,10 @@ async function main(): Promise<void> {
             } else {
               const relative = plannedFile(section, lecture);
               await writeMarkdown(root, relative, result.content);
-              if (result.type === 'video') console.log(transcriptCompletedLine(result.cueCount ?? 0));
+              if (result.type === 'video') {
+                activeTranscriptLine?.finish(transcriptCompletedLine(result.cueCount ?? 0));
+                activeTranscriptLine = null;
+              }
               lecture.status = 'completed';
               lecture.reason = null;
               lecture.outputFile = relative;
@@ -449,6 +475,8 @@ async function main(): Promise<void> {
           }
           break;
         } catch (error) {
+          activeTranscriptLine?.finish(`      Transcript [gagal] ${String(error)}`);
+          activeTranscriptLine = null;
           failure = error;
           if (stage !== 'content') {
             lecture.attachmentReason = String(error);
