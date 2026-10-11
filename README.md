@@ -95,6 +95,17 @@ Ditambahkan. Total queue: 2
 URL course #3 (kosong = mulai):
 ```
 
+Pada baris terakhir contoh di atas, langsung tekan **Enter** tanpa mengetik apa pun. Jika terminal masih menampilkan `URL course #8 (kosong = mulai):`, berarti tujuh URL sudah masuk ke queue, tetapi pemrosesan belum dimulai karena runner masih menunggu Enter kosong.
+
+Setelah queue dimulai, progress tampil langsung di terminal:
+
+```text
+=== Course 1/7 ===
+=== Pass 1/3 ===
+```
+
+`Course 1/7` berarti scraper sedang mengerjakan course pertama dari tujuh course. Terminal juga menampilkan section dan lecture aktif. Setelah satu course selesai, runner otomatis melanjutkan ke `Course 2/7` sampai queue habis, kemudian proses terminal berhenti sendiri.
+
 Queue diproses secara berurutan agar transcript dan resource tidak tertukar. Setelah course pertama selesai, scraper otomatis membuka course kedua pada tab Course Player yang sama. URL duplikat tidak ditambahkan dua kali.
 
 Jika satu course belum tuntas setelah seluruh percobaan, checkpoint-nya tetap tersimpan dan scraper melanjutkan course berikutnya. CAPTCHA atau token extension yang tidak tersedia akan menghentikan seluruh queue karena keduanya memerlukan tindakan pengguna.
@@ -193,5 +204,7 @@ Course yang sudah dinyatakan lengkap belum diperiksa otomatis untuk materi baru 
 | Belum login | Login ke Udemy di Chrome lalu jalankan ulang. |
 | Proses terputus | Jalankan `npm start` dengan URL yang sama; jangan hapus manifest. |
 | Existing course belum memiliki resource | Jalankan ulang URL yang sama; resource lama akan dimigrasikan. |
-| Proses belum selesai | Periksa `logs/`, `scraping_log.json`, manifest, dan folder `_debug/`. |
+| Sudah memasukkan URL tetapi belum berjalan | Pada prompt URL berikutnya, tekan Enter tanpa mengetik apa pun untuk memulai queue. |
+| Ingin melihat progress queue | Lihat terminal runner: `Course X/Y` menunjukkan posisi course dan baris berikutnya menunjukkan pass, section, serta lecture aktif. |
+| Proses belum selesai | Periksa terminal, `logs/`, `scraping_log.json`, manifest, dan folder `_debug/`. |
 | CAPTCHA/security challenge | Selesaikan secara manual di Chrome lalu jalankan ulang. |
