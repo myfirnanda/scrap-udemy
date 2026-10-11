@@ -5,6 +5,7 @@ import { attachExistingChrome, cli, runCode, runCodeFile } from './extension-cli
 import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, type PageHealth } from './extension-ops.js';
 import { courseFingerprint, findExistingCourse, isCourseComplete, loadManifest, plannedFile, reconcileManifest, saveManifest, type Attachment, type Lecture, type Manifest, type Section } from './manifest.js';
 import { writeMarkdown } from './markdown-writer.js';
+import { appendTranscriptCues, transcriptCompletedLine, transcriptPercent, transcriptProgressLine, type TranscriptBatch, type TranscriptCue } from './transcript-progress.js';
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
 
 type Mode = 'lecture' | 'section' | 'all';
@@ -126,12 +127,51 @@ function toMarkdown(html: string): string {
   return new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced' }).turndown(html).trim() + '\n';
 }
 
+async function extractVideoTranscript(): Promise<TextResult> {
+  const started = Date.now();
+  const cues: TranscriptCue[] = [];
+  let batchNumber = 0;
+  let totalSteps = 0;
+  let percent = 0;
+  let duration: number | null | undefined;
+  console.log('      Transcript [menyiapkan] membuka panel dan membaca durasi video...');
+  let batch = await runCodeFile<TranscriptBatch>('scripts/init-transcript.js');
+  if (batch.availability !== 'available') return { content: null, availability: batch.availability, reason: batch.reason };
+  appendTranscriptCues(cues, batch.cues ?? []);
+  duration = batch.duration;
+  console.log(transcriptProgressLine(transcriptPercent(batch, percent), cues.length, batchNumber, (Date.now() - started) / 1000, duration));
+
+  while (!batch.complete && totalSteps < 1000) {
+    batch = await runCodeFile<TranscriptBatch>('scripts/extract-transcript.js');
+    if (batch.availability !== 'available') return { content: null, availability: batch.availability, reason: batch.reason };
+    batchNumber++;
+    totalSteps += batch.steps ?? 0;
+    appendTranscriptCues(cues, batch.cues ?? []);
+    duration = batch.duration ?? duration;
+    const measuredPercent = transcriptPercent(batch, percent);
+    const nextPercent = batch.complete ? 99 : measuredPercent;
+    if (nextPercent !== null) percent = nextPercent;
+    console.log(transcriptProgressLine(nextPercent, cues.length, batchNumber, (Date.now() - started) / 1000, duration));
+  }
+
+  if (!batch.complete) throw new TransientContentError('Transcript belum mencapai akhir setelah 1000 scroll.');
+  if (!cues.length) return { content: null, availability: 'unavailable', reason: 'Panel transcript tersedia tetapi tidak memiliki cue.' };
+  return {
+    content: cues.map(cue => cue.text).join('\n\n') + '\n',
+    cueCount: cues.length,
+    firstCue: cues[0]?.text ?? null,
+    lastCue: cues.at(-1)?.text ?? null,
+    availability: 'available',
+    reason: null
+  };
+}
+
 async function extract(lecture: Lecture): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null }> {
   const types = lecture.type === 'unknown' ? (['article', 'video', 'resource'] as const) : [lecture.type];
   let retryReason: string | null = null;
   for (const type of types) {
     if (type === 'video') {
-      const result = await runCodeFile<TextResult>('scripts/extract-transcript.js');
+      const result = await extractVideoTranscript();
       if (result.availability === 'retryable') {
         retryReason = result.reason ?? 'Transcript belum siap.';
         if (lecture.type !== 'unknown') throw new TransientContentError(retryReason);
@@ -395,6 +435,7 @@ async function main(): Promise<void> {
             } else {
               const relative = plannedFile(section, lecture);
               await writeMarkdown(root, relative, result.content);
+              if (result.type === 'video') console.log(transcriptCompletedLine(result.cueCount ?? 0));
               lecture.status = 'completed';
               lecture.reason = null;
               lecture.outputFile = relative;

@@ -1,25 +1,13 @@
 async (page) => {
   const panel = page.locator('[data-purpose="transcript-panel"]');
-  if (!await panel.isVisible().catch(() => false)) {
-    await page.evaluate(() => window.scrollTo(0, 0));
-    const toggle = page.locator('[data-purpose="transcript-toggle"]');
-    if (!await toggle.count()) return { content: null, availability: 'retryable', reason: 'Kontrol transcript tidak ditemukan; transcript belum dapat dikonfirmasi tidak tersedia.' };
-    try { await toggle.click({ timeout: 3000 }); }
-    catch { await toggle.evaluate(el => el.click()); }
-    try { await panel.waitFor({ state: 'visible', timeout: 8000 }); }
-    catch { return { content: null, availability: 'retryable', reason: 'Panel transcript belum siap setelah timeout.' }; }
-  }
+  if (!await panel.isVisible().catch(() => false)) return { availability: 'retryable', reason: 'Panel transcript tidak lagi terbuka.' };
   const scroll = page.locator('[data-purpose="sidebar-content"]');
-  await scroll.evaluate(el => { el.scrollTop = 0; });
   let all = [];
   let tailStable = 0;
   let lastTailKey = '';
   const readCues = () => panel.locator('[data-purpose="cue-text"]').evaluateAll(nodes => nodes.map(node => {
     const text = (node.textContent || '').trim().replace(/\s+/g, ' ');
-    const container = node.closest('button, [data-purpose*="cue"]');
-    const marker = [container?.getAttribute('aria-label'), container?.getAttribute('data-time'), container?.textContent]
-      .filter(Boolean).join('|').trim().replace(/\s+/g, ' ');
-    return { key: marker || text, text };
+    return { key: text, text };
   }).filter(cue => cue.text));
   const appendSnapshot = snapshot => {
     let overlap = 0;
@@ -28,7 +16,9 @@ async (page) => {
     }
     all.push(...snapshot.slice(overlap));
   };
-  for (let step = 0; step < 1000; step++) {
+  let steps = 0;
+  let complete = false;
+  for (; steps < 12; steps++) {
     const snapshot = await readCues();
     appendSnapshot(snapshot);
     await scroll.evaluate(el => {
@@ -56,21 +46,13 @@ async (page) => {
     const tailKey = settledSnapshot.at(-1)?.key ?? '';
     tailStable = settled.end && tailKey && tailKey === lastTailKey ? tailStable + 1 : 0;
     lastTailKey = tailKey;
-    if (tailStable >= 3) break;
-    if (step === 999) throw new Error('Transcript belum mencapai akhir setelah 1000 scroll.');
+    if (tailStable >= 3) { complete = true; steps++; break; }
   }
-  const finalSnapshot = await readCues();
-  let finalOverlap = 0;
-  for (let size = Math.min(all.length, finalSnapshot.length); size > 0; size--) {
-    if (all.slice(-size).every((cue, i) => cue.key === finalSnapshot[i].key)) { finalOverlap = size; break; }
-  }
-  all.push(...finalSnapshot.slice(finalOverlap));
-  return {
-    content: all.length ? all.map(cue => cue.text).join('\n\n') + '\n' : null,
-    cueCount: all.length,
-    firstCue: all[0]?.text ?? null,
-    lastCue: all.at(-1)?.text ?? null,
-    availability: all.length ? 'available' : 'unavailable',
-    reason: all.length ? null : 'Panel transcript tersedia tetapi tidak memiliki cue.'
-  };
+  const metrics = await scroll.evaluate(el => ({
+    scrollTop: el.scrollTop,
+    scrollExtent: Math.max(0, el.scrollHeight - el.clientHeight),
+    atEnd: el.scrollTop >= el.scrollHeight - el.clientHeight - 2
+  }));
+  const duration = await page.locator('video').first().evaluate(video => Number.isFinite(video.duration) ? video.duration : null).catch(() => null);
+  return { availability: 'available', reason: null, cues: all, ...metrics, duration, steps, complete };
 }

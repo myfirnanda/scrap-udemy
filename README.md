@@ -109,6 +109,15 @@ Setelah queue dimulai, progress tampil langsung di terminal:
 
 `Course 1/7` berarti scraper sedang mengerjakan course pertama dari tujuh course. Terminal juga menampilkan section dan lecture aktif. Setelah satu course selesai, runner otomatis melanjutkan ke `Course 2/7` sampai queue habis, kemudian proses terminal berhenti sendiri.
 
+Saat video ditranskrip, terminal menampilkan progress per batch:
+
+```text
+Transcript [##########----------] ~50% | ~9:44/19:29 | 271 cue | batch 3 | 0:28
+Transcript [####################] 100% | 271 cue | tersimpan
+```
+
+Persentase bertanda `~` adalah estimasi posisi panel transcript terhadap durasi video. Nilainya dapat diam sementara ketika Udemy menambah tinggi panel secara dinamis; nomor batch, jumlah cue, dan waktu berjalan tetap menunjukkan proses masih aktif. Angka `100%` hanya ditampilkan setelah Markdown berhasil disimpan.
+
 Queue diproses secara berurutan agar transcript dan resource tidak tertukar. Setelah course pertama selesai, scraper otomatis membuka course kedua pada tab Course Player yang sama. URL duplikat tidak ditambahkan dua kali.
 
 Jika satu course belum tuntas atau mengalami security challenge, checkpoint dan detail masalahnya disimpan lalu scraper melanjutkan course berikutnya. Token extension yang tidak tersedia tetap menghentikan runner karena semua course membutuhkan koneksi tersebut.
