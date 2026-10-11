@@ -82,7 +82,7 @@ if ($unfinishedSaved.Count -gt 0) {
     }
     $courseUrl = Get-NormalizedCourseUrl -Value $value
     if (-not $courseUrl) {
-      Write-Host 'URL tidak valid. Contoh: https://www.udemy.com/course/retrieval-augmented-gen/' -ForegroundColor Yellow
+      Write-Host 'URL tidak valid. Format: https://www.udemy.com/course/nama-course/' -ForegroundColor Yellow
       continue
     }
     if ($urls.Contains($courseUrl)) {
