@@ -1,3 +1,52 @@
+import { decidePageHealth } from './page-health.js';
+
+export interface PageHealth {
+  url: string;
+  state: 'ready' | 'blocked' | 'transient';
+  evidence: string[];
+  navigationReady?: boolean;
+}
+
+function inspectPageBody(lectureId: string | null): string {
+  return `
+    const expectedLectureId = ${JSON.stringify(lectureId)};
+    const health = await page.evaluate((expectedId) => {
+      const decidePageHealth = ${decidePageHealth.toString()};
+      const visible = (element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      };
+      const url = new URL(location.href);
+      const title = document.title.trim().toLowerCase();
+      const text = document.body.innerText.trim();
+      const curriculum = [...document.querySelectorAll('[data-purpose="curriculum-section-container"]')].some(visible);
+      const expectedLecture = !expectedId || url.pathname.includes('/lecture/' + expectedId);
+      const challengeSelector = 'iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[src*="challenge"], [data-testid*="captcha"], form[action*="challenge"]';
+      const decision = decidePageHealth({
+        urlPath: url.pathname,
+        title,
+        curriculumVisible: curriculum,
+        expectedLecture,
+        visibleChallengeElement: [...document.querySelectorAll(challengeSelector)].some(visible),
+        shortChallengePage: text.length < 3000 && /verify you are human|security challenge|unusual traffic|enable javascript and cookies|you have been blocked/i.test(text)
+      });
+      return {
+        url: location.href,
+        ...decision
+      };
+    }, expectedLectureId);
+  `;
+}
+
+export function inspectPageHealthCode(lectureId: string | null): string {
+  return `async (page) => {
+    ${inspectPageBody(lectureId)}
+    return health;
+  }`;
+}
+
 export function navigateCode(sectionIndex: number, lectureIndex: number, lectureId: string | null): string {
   const itemPurpose = `curriculum-item-${sectionIndex}-${lectureIndex}`;
   return `async (page) => {
@@ -7,20 +56,14 @@ export function navigateCode(sectionIndex: number, lectureIndex: number, lecture
     const item = page.locator('[data-purpose="${itemPurpose}"]:visible [data-purpose="item-title"]').first();
     await item.waitFor({ state: 'visible', timeout: 10000 });
     await item.evaluate(el => el.click());
-    ${lectureId
-      ? `await page.waitForFunction((id) => location.pathname.includes('/lecture/' + id) && !document.querySelector('[class*="curriculum-item-view--loader"]'), '${lectureId}', { timeout: 15000 }).catch(() => {});`
-      : `await page.waitForFunction(() => !document.querySelector('[class*="curriculum-item-view--loader"]'), undefined, { timeout: 8000 }).catch(() => {});`}
-    const challenge = await page.evaluate(() => {
-      const url = location.href.toLowerCase();
-      const title = document.title.toLowerCase();
-      const text = document.body.innerText.trim();
-      const challengeElement = document.querySelector('iframe[src*="captcha"], iframe[src*="challenge"], [id*="captcha"], [data-testid*="captcha"], form[action*="challenge"]');
-      return /captcha|challenge|access-denied|blocked/.test(url)
-        || /verify you are human|security challenge|access denied|just a moment/.test(title)
-        || challengeElement !== null
-        || (text.length < 3000 && /verify you are human|security challenge|captcha|unusual traffic/.test(text.toLowerCase()));
-    });
-    return { url: page.url(), challenge };
+    let navigationReady = true;
+    try {
+      ${lectureId
+        ? `await page.waitForFunction((id) => location.pathname.includes('/lecture/' + id) && !document.querySelector('[class*="curriculum-item-view--loader"]'), '${lectureId}', { timeout: 15000 });`
+        : `await page.waitForFunction(() => !document.querySelector('[class*="curriculum-item-view--loader"]'), undefined, { timeout: 8000 });`}
+    } catch { navigationReady = false; }
+    ${inspectPageBody(lectureId)}
+    return { ...health, navigationReady };
   }`;
 }
 
@@ -83,7 +126,7 @@ export function downloadAttachmentCode(sectionIndex: number, lectureIndex: numbe
     }
     if (event.kind !== 'download') {
       if (page.url() !== startUrl) await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-      return { kind: 'skipped', reason: 'Resource tidak menghasilkan file download atau sedang tidak tersedia.' };
+      return { kind: 'retryable', reason: 'Resource tidak menghasilkan event download dalam batas waktu.' };
     }
     const download = event.download;
     await download.saveAs(${JSON.stringify(targetFile)});

@@ -13,6 +13,8 @@ Automasi menggunakan Chrome yang sudah login, Playwright CLI, dan [Playwright Ex
 - Link eksternal disimpan terpisah dalam `00_EXTERNAL_RESOURCES.md`.
 - Struktur output mengikuti course, section, dan lecture.
 - Beberapa URL dapat dimasukkan ke queue dan diproses berurutan.
+- Queue disimpan ke `logs/queue-state.json` dan dilanjutkan otomatis setelah proses terputus.
+- Course bermasalah dicatat lalu dilewati agar course berikutnya tetap berjalan.
 - Mendukung course dengan lebih dari satu instructor.
 - Fingerprint mencegah pemrosesan ulang course yang sudah lengkap.
 - Checkpoint memungkinkan proses dilanjutkan setelah terputus.
@@ -41,7 +43,8 @@ flowchart TD
     N -->|Ya| J
     N -->|Tidak| O{"Masih ada course di queue?"}
     O -->|Ya| E
-    O -->|Tidak| P["Tampilkan ringkasan dan keluar"]
+    O -->|Tidak| P["Simpan status dan laporan masalah"]
+    P --> Q["Tampilkan ringkasan dan keluar"]
 ```
 
 ## Persyaratan
@@ -108,7 +111,9 @@ Setelah queue dimulai, progress tampil langsung di terminal:
 
 Queue diproses secara berurutan agar transcript dan resource tidak tertukar. Setelah course pertama selesai, scraper otomatis membuka course kedua pada tab Course Player yang sama. URL duplikat tidak ditambahkan dua kali.
 
-Jika satu course belum tuntas setelah seluruh percobaan, checkpoint-nya tetap tersimpan dan scraper melanjutkan course berikutnya. CAPTCHA atau token extension yang tidak tersedia akan menghentikan seluruh queue karena keduanya memerlukan tindakan pengguna.
+Jika satu course belum tuntas atau mengalami security challenge, checkpoint dan detail masalahnya disimpan lalu scraper melanjutkan course berikutnya. Token extension yang tidak tersedia tetap menghentikan runner karena semua course membutuhkan koneksi tersebut.
+
+Queue aktif tersimpan dalam `logs/queue-state.json`. Jika terminal atau Chrome terputus, jalankan `npm start` kembali; queue yang belum selesai dilanjutkan otomatis tanpa memasukkan ulang URL. Course bermasalah dirangkum dalam `logs/problem-courses.json` beserta status, alasan, dan lokasi log terakhir.
 
 Format yang diterima:
 
@@ -118,7 +123,7 @@ https://www.udemy.com/course/<slug>/learn/
 https://www.udemy.com/course/<slug>/learn/lecture/<id>
 ```
 
-URL harus memakai `https://www.udemy.com/course/...`. Setelah proses selesai atau gagal, terminal berhenti sendiri.
+URL harus memakai `https://www.udemy.com/course/...`. Setelah seluruh queue selesai atau sudah dicatat sebagai bermasalah, terminal berhenti sendiri.
 
 Chrome utama dan tab lain tidak ditutup. Popup yang dibuat oleh resource eksternal dapat ditutup setelah URL-nya dicatat.
 
@@ -151,18 +156,19 @@ output/
 - Link eksternal dari menu Resources disimpan dalam `00_EXTERNAL_RESOURCES.md`.
 - File attachment diberi nomor `01_...`, `02_...`, dan seterusnya.
 - Resource selalu berada di dalam section dan folder lecture pemiliknya.
-- `course_manifest.json` menyimpan fingerprint, status, lokasi file, dan checkpoint.
+- `course_manifest.json` menyimpan fingerprint, status, metadata transcript, lokasi file, dan checkpoint.
 - `_debug/` menyimpan screenshot dan HTML ketika lecture gagal.
 - `logs/` pada root project menyimpan output setiap course dan pass dalam queue.
 
 ## Checkpoint, resume, dan fingerprint
 
-Jika terminal, Chrome, jaringan, atau extension terputus, jalankan `npm start` kembali dan masukkan kembali URL course yang belum selesai. Checkpoint course tetap digunakan.
+Jika terminal, Chrome, jaringan, atau extension terputus, jalankan `npm start` kembali. Queue dan checkpoint course yang belum selesai digunakan otomatis.
 
 Saat resume, scraper akan:
 
 - Melewati transcript dan attachment yang file-nya masih lengkap.
 - Mengulang item `pending`, `failed`, hilang, atau kosong.
+- Mengulang timeout transcript, navigasi, dan download; kondisi tersebut tidak dianggap `skipped` permanen.
 - Memindai ulang resource dari manifest lama yang belum mempunyai jenis resource.
 - Mempertahankan hasil lecture lama ketika curriculum masih cocok.
 
@@ -172,7 +178,7 @@ Fingerprint merupakan SHA-256 dari judul course dan seluruh instructor. Pesan be
 Course sudah pernah ditranskrip: "Judul Course" oleh Nama Instructor.
 ```
 
-Course yang sudah dinyatakan lengkap belum diperiksa otomatis untuk materi baru yang ditambahkan Udemy setelahnya. Untuk melakukan pengambilan ulang penuh, pindahkan folder course lama keluar dari `output/` sebagai backup lalu jalankan kembali.
+Saat URL dijalankan kembali, curriculum terbaru dibandingkan dengan manifest. Lecture atau resource baru diproses tanpa mengulang file lama yang masih lengkap.
 
 ## Kelebihan dan keterbatasan
 
@@ -192,7 +198,6 @@ Course yang sudah dinyatakan lengkap belum diperiksa otomatis untuk materi baru 
 - Transcript tidak menyertakan timestamp atau speaker.
 - Video, audio, quiz, dan exercise interaktif tidak diekspor.
 - Pemrosesan masih berurutan, belum paralel.
-- Course yang sudah lengkap belum mempunyai mode refresh otomatis.
 
 ## Troubleshooting
 
@@ -202,7 +207,8 @@ Course yang sudah dinyatakan lengkap belum diperiksa otomatis untuk materi baru 
 | Token tidak tersedia | Isi `PLAYWRIGHT_MCP_EXTENSION_TOKEN` pada `.env`. |
 | Koneksi timeout | Buka extension, salin ulang token, perbarui `.env`, lalu jalankan ulang. |
 | Belum login | Login ke Udemy di Chrome lalu jalankan ulang. |
-| Proses terputus | Jalankan `npm start` dengan URL yang sama; jangan hapus manifest. |
+| Proses terputus | Jalankan `npm start`; queue tersimpan dilanjutkan otomatis dan manifest jangan dihapus. |
+| Satu course bermasalah | Course tersebut dilewati; lihat alasan dan log pada `logs/problem-courses.json`. |
 | Existing course belum memiliki resource | Jalankan ulang URL yang sama; resource lama akan dimigrasikan. |
 | Sudah memasukkan URL tetapi belum berjalan | Pada prompt URL berikutnya, tekan Enter tanpa mengetik apa pun untuk memulai queue. |
 | Ingin melihat progress queue | Lihat terminal runner: `Course X/Y` menunjukkan posisi course dan baris berikutnya menunjukkan pass, section, serta lecture aktif. |

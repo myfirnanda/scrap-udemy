@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { existsNonempty, relativeFile, writeJsonAtomic } from './utils.js';
 
 export type LectureType = 'video' | 'article' | 'resource' | 'quiz' | 'exercise' | 'unknown';
-export type Status = 'pending' | 'completed' | 'skipped' | 'failed';
-export type AttachmentStatus = 'pending' | 'completed' | 'skipped' | 'failed';
+export type Status = 'pending' | 'completed' | 'unavailable' | 'skipped' | 'failed';
+export type AttachmentStatus = 'pending' | 'completed' | 'unavailable' | 'skipped' | 'failed';
 export type AttachmentKind = 'download' | 'external' | 'unknown';
 export interface Attachment {
   sourceIndex: number;
@@ -30,6 +30,12 @@ export interface Lecture {
   attachmentsScanned?: boolean;
   attachmentReason?: string | null;
   attachments?: Attachment[];
+  transcriptMeta?: {
+    cueCount: number;
+    firstCue: string | null;
+    lastCue: string | null;
+    extractedAt: string;
+  } | null;
 }
 export interface Section { number: number; title: string; id: string | null; lectures: Lecture[] }
 export interface Manifest {
@@ -75,11 +81,13 @@ export async function isCourseComplete(root: string, manifest: Manifest): Promis
   for (const section of manifest.sections) {
     for (const lecture of section.lectures) {
       if (lecture.status === 'pending' || lecture.status === 'failed') return false;
+      if (lecture.status === 'skipped' && lecture.type !== 'quiz' && lecture.type !== 'exercise') return false;
       if (lecture.status === 'completed' && (!lecture.outputFile || !await existsNonempty(path.join(root, lecture.outputFile)))) return false;
       if (lecture.attachmentsScanned !== true) return false;
       if (lecture.hasResources && (!(lecture.attachments?.length) || lecture.attachments.some(attachment => !attachment.kind))) return false;
       for (const attachment of lecture.attachments ?? []) {
-        if (attachment.status === 'skipped') continue;
+        if (attachment.status === 'unavailable') continue;
+        if (attachment.status === 'skipped') return false;
         if (attachment.status !== 'completed' || !attachment.outputFile || !await existsNonempty(path.join(root, attachment.outputFile))) return false;
       }
     }
@@ -103,7 +111,11 @@ export async function reconcileManifest(fresh: Manifest, previous: Manifest | nu
       if (old.status === 'completed' && old.outputFile && await existsNonempty(path.join(root, old.outputFile))) {
         lecture.status = 'completed';
         lecture.outputFile = old.outputFile;
-      } else if (old.status === 'skipped') {
+        lecture.transcriptMeta = old.transcriptMeta ?? null;
+      } else if (old.status === 'unavailable') {
+        lecture.status = 'unavailable';
+        lecture.reason = old.reason;
+      } else if (old.status === 'skipped' && (lecture.type === 'quiz' || lecture.type === 'exercise')) {
         lecture.status = 'skipped';
         lecture.reason = old.reason;
       }
@@ -114,12 +126,12 @@ export async function reconcileManifest(fresh: Manifest, previous: Manifest | nu
         lecture.attachmentReason = old.attachmentReason ?? null;
         lecture.attachments = [];
         for (const attachment of oldAttachments) {
-          const skipped = attachment.status === 'skipped';
+          const unavailable = attachment.status === 'unavailable';
           const complete = attachment.status === 'completed' && attachment.outputFile && await existsNonempty(path.join(root, attachment.outputFile));
           lecture.attachments.push({
             ...attachment,
-            status: skipped ? 'skipped' : complete ? 'completed' : 'pending',
-            reason: skipped ? attachment.reason : complete ? null : attachment.reason,
+            status: unavailable ? 'unavailable' : complete ? 'completed' : 'pending',
+            reason: unavailable ? attachment.reason : complete ? null : attachment.reason,
             outputFile: complete ? attachment.outputFile : null,
             size: complete ? attachment.size : null
           });

@@ -2,18 +2,26 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import TurndownService from 'turndown';
 import { attachExistingChrome, cli, runCode, runCodeFile } from './extension-cli.js';
-import { discoverAttachmentsCode, downloadAttachmentCode, navigateCode } from './extension-ops.js';
+import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, type PageHealth } from './extension-ops.js';
 import { courseFingerprint, findExistingCourse, isCourseComplete, loadManifest, plannedFile, reconcileManifest, saveManifest, type Attachment, type Lecture, type Manifest, type Section } from './manifest.js';
 import { writeMarkdown } from './markdown-writer.js';
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
 
 type Mode = 'lecture' | 'section' | 'all';
-type HtmlResult = { html: string | null; reason: string | null };
-type TextResult = { content: string | null; reason: string | null; cueCount?: number };
+type Availability = 'available' | 'unavailable' | 'retryable';
+type HtmlResult = { html: string | null; reason: string | null; availability?: Availability };
+type TextResult = { content: string | null; reason: string | null; availability?: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null };
 type LogEntry = { time: string; section: number; lecture: number; status: string; reason?: string; attachmentReason?: string };
 type CourseIdentity = { courseTitle: string; courseOwner: string; courseUrl: string };
 type DiscoveredAttachment = { sourceIndex: number; name: string; href: string; kind: 'download' | 'external' | 'unknown' };
-type DownloadResult = { kind: 'downloaded' | 'external' | 'skipped'; suggestedFilename?: string; url?: string; reason?: string };
+type DownloadResult = { kind: 'downloaded' | 'external' | 'retryable' | 'skipped'; suggestedFilename?: string; url?: string; reason?: string };
+
+class SecurityChallengeError extends Error {
+  constructor(readonly evidence: string[]) { super(`SECURITY_CHALLENGE_DETECTED: ${evidence.join(', ')}`); }
+}
+
+class TransientNavigationError extends Error {}
+class TransientContentError extends Error {}
 
 function loadLocalEnv(): void {
   try { process.loadEnvFile(path.resolve('.env')); }
@@ -40,6 +48,9 @@ function lectureAttempts(): number {
 }
 
 function isRetryableLectureError(error: unknown): boolean {
+  if (error instanceof TransientNavigationError) return true;
+  if (error instanceof TransientContentError) return true;
+  if (error instanceof SecurityChallengeError) return false;
   const message = String(error).toLowerCase();
   if (message.includes('security_challenge_detected')) return false;
   return /timeout|timed out|net::|network|connection|target page|browser has been closed|disconnected/.test(message);
@@ -115,20 +126,32 @@ function toMarkdown(html: string): string {
   return new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced' }).turndown(html).trim() + '\n';
 }
 
-async function extract(lecture: Lecture): Promise<{ content: string | null; reason: string | null; type: Lecture['type'] }> {
+async function extract(lecture: Lecture): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null }> {
   const types = lecture.type === 'unknown' ? (['article', 'video', 'resource'] as const) : [lecture.type];
+  let retryReason: string | null = null;
   for (const type of types) {
     if (type === 'video') {
       const result = await runCodeFile<TextResult>('scripts/extract-transcript.js');
-      if (result.content?.trim()) return { content: result.content, reason: null, type };
-      if (lecture.type !== 'unknown') return { content: null, reason: result.reason, type };
+      if (result.availability === 'retryable') {
+        retryReason = result.reason ?? 'Transcript belum siap.';
+        if (lecture.type !== 'unknown') throw new TransientContentError(retryReason);
+        continue;
+      }
+      if (result.content?.trim()) return { content: result.content, reason: null, type, availability: 'available', cueCount: result.cueCount, firstCue: result.firstCue, lastCue: result.lastCue };
+      if (lecture.type !== 'unknown') return { content: null, reason: result.reason, type, availability: 'unavailable' };
     } else if (type === 'article' || type === 'resource') {
       const result = await runCodeFile<HtmlResult>(`scripts/extract-${type}.js`);
-      if (result.html?.trim()) return { content: toMarkdown(result.html), reason: null, type };
-      if (lecture.type !== 'unknown') return { content: null, reason: result.reason, type };
+      if (result.availability === 'retryable') {
+        retryReason = result.reason ?? 'Konten belum siap.';
+        if (lecture.type !== 'unknown') throw new TransientContentError(retryReason);
+        continue;
+      }
+      if (result.html?.trim()) return { content: toMarkdown(result.html), reason: null, type, availability: 'available' };
+      if (lecture.type !== 'unknown') return { content: null, reason: result.reason, type, availability: 'unavailable' };
     }
   }
-  return { content: null, reason: 'Konten teks tidak tersedia atau tidak didukung.', type: lecture.type };
+  if (retryReason) throw new TransientContentError(retryReason);
+  return { content: null, reason: 'Konten teks tidak tersedia atau tidak didukung.', type: lecture.type, availability: 'unavailable' };
 }
 
 async function syncAttachments(root: string, section: Section, lecture: Lecture, checkpoint: () => Promise<void>): Promise<void> {
@@ -144,15 +167,15 @@ async function syncAttachments(root: string, section: Section, lecture: Lecture,
   const attachments: Attachment[] = [];
   for (const item of discovered) {
     const old = previous.find(entry => entry.sourceIndex === item.sourceIndex);
-    const skipped = old?.status === 'skipped' && old.kind !== undefined && item.kind !== 'external';
+    const unavailable = old?.status === 'unavailable' && old.kind !== undefined && item.kind !== 'external';
     const complete = old?.status === 'completed' && old.outputFile && await existsNonempty(path.join(root, old.outputFile));
     attachments.push({
       sourceIndex: item.sourceIndex,
       name: old?.name || item.name,
       href: item.href,
       kind: item.kind,
-      status: skipped ? 'skipped' : complete ? 'completed' : 'pending',
-      reason: skipped ? old?.reason ?? null : complete ? null : old?.reason ?? null,
+      status: unavailable ? 'unavailable' : complete ? 'completed' : 'pending',
+      reason: unavailable ? old?.reason ?? null : complete ? null : old?.reason ?? null,
       outputFile: complete ? old.outputFile : null,
       size: complete ? old.size : null
     });
@@ -172,7 +195,7 @@ async function syncAttachments(root: string, section: Section, lecture: Lecture,
     const attachment = attachments[position];
     if (attachment.kind === 'external') continue;
     downloadPosition++;
-    if (attachment.status === 'completed' || attachment.status === 'skipped') continue;
+    if (attachment.status === 'completed' || attachment.status === 'unavailable') continue;
     const temporary = path.join(absoluteDir, `.attachment-${attachment.sourceIndex}-${process.pid}.part`);
     try {
       const result = await runCode<DownloadResult>(downloadAttachmentCode(
@@ -199,6 +222,7 @@ async function syncAttachments(root: string, section: Section, lecture: Lecture,
         await checkpoint();
         continue;
       }
+      if (result.kind === 'retryable') throw new TransientContentError(result.reason ?? 'Resource belum siap.');
       if (!await existsNonempty(temporary)) throw new Error('File hasil download kosong atau tidak ditemukan.');
       const originalName = result.suggestedFilename?.trim() || attachment.name;
       const savedName = `${String(downloadPosition).padStart(2, '0')}_${cleanName(originalName)}`;
@@ -283,12 +307,6 @@ async function main(): Promise<void> {
   if (existing) {
     existing.manifest.courseOwner = identity.courseOwner;
     existing.manifest.fingerprint = fingerprint;
-    if (await isCourseComplete(existing.root, existing.manifest)) {
-      existing.manifest.completedAt ??= new Date().toISOString();
-      await saveManifest(path.join(existing.root, 'course_manifest.json'), existing.manifest);
-      console.log(`Course sudah pernah ditranskrip: "${identity.courseTitle}" oleh ${identity.courseOwner}.`);
-      return;
-    }
   }
 
   const fresh = await runCodeFile<Manifest>('scripts/parse-course.js');
@@ -305,9 +323,18 @@ async function main(): Promise<void> {
   manifest.completedAt = null;
   for (const section of manifest.sections) await fs.mkdir(path.join(root, `${section.number}_${cleanName(section.title)}`), { recursive: true });
   await saveManifest(manifestFile, manifest);
+  if (await isCourseComplete(root, manifest)) {
+    manifest.completedAt = new Date().toISOString();
+    await saveManifest(manifestFile, manifest);
+    const unavailable = manifest.sections.flatMap(section => section.lectures).filter(lecture => lecture.status === 'unavailable').length;
+    console.log(unavailable
+      ? `Course sudah pernah diproses dengan ${unavailable} konten tidak tersedia: "${identity.courseTitle}" oleh ${identity.courseOwner}.`
+      : `Course sudah pernah ditranskrip dan curriculum terbaru sudah diperiksa: "${identity.courseTitle}" oleh ${identity.courseOwner}.`);
+    return;
+  }
   if (existing) {
     const lectures = manifest.sections.flatMap(section => section.lectures);
-    const finished = lectures.filter(lecture => lecture.status === 'completed' || lecture.status === 'skipped').length;
+    const finished = lectures.filter(lecture => lecture.status === 'completed' || lecture.status === 'unavailable' || lecture.status === 'skipped').length;
     console.log(`Checkpoint ditemukan: ${finished}/${lectures.length} lecture sudah tersimpan. Melanjutkan sisanya...`);
   }
   let log: LogEntry[] = [];
@@ -323,8 +350,10 @@ async function main(): Promise<void> {
     if (config.mode === 'section' && section.number > 1) break;
     console.log(`Section ${section.number}/${manifest.sections.length}: ${section.title}`);
     for (const lecture of section.lectures) {
-      const contentDone = lecture.status === 'completed' || lecture.status === 'skipped';
-      const attachmentsDone = lecture.attachmentsScanned === true && (lecture.attachments ?? []).every(attachment => attachment.status === 'completed' || attachment.status === 'skipped');
+      const contentDone = lecture.status === 'completed' || lecture.status === 'unavailable' || lecture.status === 'skipped';
+      const attachments = lecture.attachments ?? [];
+      const attachmentsDone = lecture.attachmentsScanned === true
+        && (!lecture.hasResources || (attachments.length > 0 && attachments.every(attachment => attachment.kind && (attachment.status === 'completed' || attachment.status === 'unavailable'))));
       if (contentDone && attachmentsDone) continue;
       if (config.mode === 'lecture' && attempted >= 1) break;
       attempted++;
@@ -342,31 +371,49 @@ async function main(): Promise<void> {
       }
       let failure: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        let stage: 'navigation' | 'attachments' | 'content' = 'navigation';
         try {
-          const state = await runCode<{ url: string; challenge: boolean }>(navigateCode(section.number - 1, lecture.number - 1, lecture.id));
-          if (state.challenge) throw new Error('SECURITY_CHALLENGE_DETECTED');
-          if (lecture.id && !state.url.includes(`/lecture/${lecture.id}`)) throw new Error('Navigasi lecture tidak mencapai URL yang diharapkan.');
+          const state = await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id));
+          if (state.state === 'blocked') {
+            await pause(1500);
+            const confirmed = await runCode<PageHealth>(inspectPageHealthCode(lecture.id));
+            if (confirmed.state === 'blocked') throw new SecurityChallengeError(confirmed.evidence);
+          }
+          if (state.state !== 'ready' || state.navigationReady === false || (lecture.id && !state.url.includes(`/lecture/${lecture.id}`))) {
+            throw new TransientNavigationError(`Navigasi lecture belum siap: ${state.evidence.join(', ') || 'course-player-or-url-not-ready'}`);
+          }
+          stage = 'attachments';
           await syncAttachments(root, section, lecture, () => saveManifest(manifestFile, manifest));
-          if (lecture.status !== 'completed' && lecture.status !== 'skipped') {
+          stage = 'content';
+          if (lecture.status !== 'completed' && lecture.status !== 'unavailable' && lecture.status !== 'skipped') {
             const result = await extract(lecture);
             lecture.type = result.type;
             if (!result.content?.trim()) {
-              lecture.status = 'skipped';
+              lecture.status = 'unavailable';
               lecture.reason = result.reason;
+              lecture.outputFile = null;
             } else {
               const relative = plannedFile(section, lecture);
               await writeMarkdown(root, relative, result.content);
               lecture.status = 'completed';
               lecture.reason = null;
               lecture.outputFile = relative;
+              lecture.transcriptMeta = result.type === 'video' && result.cueCount !== undefined ? {
+                cueCount: result.cueCount,
+                firstCue: result.firstCue ?? null,
+                lastCue: result.lastCue ?? null,
+                extractedAt: new Date().toISOString()
+              } : null;
             }
           }
           break;
         } catch (error) {
           failure = error;
-          lecture.attachmentReason = String(error);
-          lecture.attachmentsScanned = false;
-          if (String(error).includes('SECURITY_CHALLENGE_DETECTED')) break;
+          if (stage !== 'content') {
+            lecture.attachmentReason = String(error);
+            lecture.attachmentsScanned = false;
+          }
+          if (error instanceof SecurityChallengeError) break;
           if (attempt < maxAttempts && isRetryableLectureError(error)) {
             await selectUdemyTab(courseUrl);
             await pause(800 * attempt);
@@ -384,17 +431,20 @@ async function main(): Promise<void> {
       }
       await record(section, lecture);
       console.log(`    ${lecture.status}${lecture.reason ? `: ${lecture.reason}` : ''}`);
-      if (lecture.reason?.includes('SECURITY_CHALLENGE_DETECTED') || lecture.attachmentReason?.includes('SECURITY_CHALLENGE_DETECTED')) throw new Error('Security challenge terdeteksi; proses dihentikan.');
+      if (lecture.reason?.includes('SECURITY_CHALLENGE_DETECTED') || lecture.attachmentReason?.includes('SECURITY_CHALLENGE_DETECTED')) {
+        throw new SecurityChallengeError([lecture.reason ?? lecture.attachmentReason ?? 'unknown']);
+      }
       await pause(300);
     }
     if (config.mode === 'lecture' && attempted >= 1) break;
   }
-  const counts = { completed: 0, skipped: 0, failed: 0, pending: 0, attachmentCompleted: 0, attachmentSkipped: 0, attachmentFailed: 0, attachmentPending: 0 };
+  const counts = { completed: 0, unavailable: 0, skipped: 0, failed: 0, pending: 0, attachmentCompleted: 0, attachmentUnavailable: 0, attachmentSkipped: 0, attachmentFailed: 0, attachmentPending: 0 };
   for (const section of manifest.sections) for (const lecture of section.lectures) {
     counts[lecture.status]++;
-    if (lecture.hasResources && lecture.attachmentsScanned !== true) counts.attachmentPending++;
+    if (lecture.hasResources && (lecture.attachmentsScanned !== true || !(lecture.attachments?.length) || lecture.attachments.some(attachment => !attachment.kind))) counts.attachmentPending++;
     for (const attachment of lecture.attachments ?? []) {
       if (attachment.status === 'completed') counts.attachmentCompleted++;
+      else if (attachment.status === 'unavailable') counts.attachmentUnavailable++;
       else if (attachment.status === 'skipped') counts.attachmentSkipped++;
       else if (attachment.status === 'failed') counts.attachmentFailed++;
       else counts.attachmentPending++;
@@ -412,5 +462,5 @@ main().catch(error => {
   const message = (error as Error).message;
   console.error(message);
   process.exitCode = message.includes('ZERO_CLICK_CONFIGURATION_REQUIRED') ? 4
-    : /security challenge/i.test(message) ? 3 : 1;
+    : error instanceof SecurityChallengeError ? 3 : 1;
 });

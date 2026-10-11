@@ -20,31 +20,85 @@ function Get-NormalizedCourseUrl {
   }
 }
 
-$courseQueue = [System.Collections.Generic.List[string]]::new()
-Write-Host 'Tambahkan URL course satu per satu. Tekan Enter pada input kosong untuk mulai memproses queue.'
+$logDir = Join-Path $projectRoot 'logs'
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$queueStateFile = Join-Path $logDir 'queue-state.json'
+$problemReportFile = Join-Path $logDir 'problem-courses.json'
 
-while ($true) {
-  $value = (Read-Host ("URL course #{0} (kosong = mulai)" -f ($courseQueue.Count + 1))).Trim()
-  if (-not $value) {
-    if ($courseQueue.Count -eq 0) {
-      Write-Host 'Masukkan minimal satu URL course.' -ForegroundColor Yellow
+function Save-JsonAtomic {
+  param([string]$Path, [object]$Value)
+  $temp = "$Path.$PID.tmp"
+  $Value | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $temp -Encoding UTF8
+  if (Test-Path -LiteralPath $Path) {
+    $backup = "$Path.bak"
+    [IO.File]::Replace($temp, $Path, $backup)
+    [IO.File]::Delete($backup)
+  } else {
+    Move-Item -LiteralPath $temp -Destination $Path
+  }
+}
+
+function Save-QueueState {
+  param([object]$State)
+  $State.updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+  Save-JsonAtomic -Path $queueStateFile -Value $State
+}
+
+function Save-ProblemReport {
+  param([object]$State)
+  $problems = @($State.courses | Where-Object { $_.Status -in @('blocked', 'incomplete', 'configuration-error') } | Select-Object Number, Url, Status, Reason, LastLog, UpdatedAt)
+  Save-JsonAtomic -Path $problemReportFile -Value ([pscustomobject]@{
+    updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    courses = $problems
+  })
+}
+
+$queueState = $null
+if (Test-Path -LiteralPath $queueStateFile) {
+  try { $queueState = Get-Content -Raw -LiteralPath $queueStateFile | ConvertFrom-Json }
+  catch { Write-Warning 'Queue state lama tidak dapat dibaca; queue baru akan dibuat.' }
+}
+
+$unfinishedSaved = @(if ($queueState) { $queueState.courses | Where-Object Status -ne 'completed' })
+if ($unfinishedSaved.Count -gt 0) {
+  foreach ($course in $unfinishedSaved) {
+    $course.Status = 'pending'
+    $course.UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')
+  }
+  $courseQueue = @($queueState.courses)
+  Write-Host ("Melanjutkan queue tersimpan: {0} course belum selesai dari total {1}." -f $unfinishedSaved.Count, $courseQueue.Count) -ForegroundColor Cyan
+  Save-QueueState -State $queueState
+} else {
+  $urls = [System.Collections.Generic.List[string]]::new()
+  Write-Host 'Tambahkan URL course satu per satu. Tekan Enter pada input kosong untuk mulai memproses queue.'
+  while ($true) {
+    $value = (Read-Host ("URL course #{0} (kosong = mulai)" -f ($urls.Count + 1))).Trim()
+    if (-not $value) {
+      if ($urls.Count -eq 0) {
+        Write-Host 'Masukkan minimal satu URL course.' -ForegroundColor Yellow
+        continue
+      }
+      break
+    }
+    $courseUrl = Get-NormalizedCourseUrl -Value $value
+    if (-not $courseUrl) {
+      Write-Host 'URL tidak valid. Contoh: https://www.udemy.com/course/retrieval-augmented-gen/' -ForegroundColor Yellow
       continue
     }
-    break
+    if ($urls.Contains($courseUrl)) {
+      Write-Host 'URL tersebut sudah ada dalam queue.' -ForegroundColor Yellow
+      continue
+    }
+    [void]$urls.Add($courseUrl)
+    Write-Host ("Ditambahkan. Total queue: {0}" -f $urls.Count) -ForegroundColor Green
   }
-
-  $courseUrl = Get-NormalizedCourseUrl -Value $value
-  if (-not $courseUrl) {
-    Write-Host 'URL tidak valid. Contoh: https://www.udemy.com/course/retrieval-augmented-gen/' -ForegroundColor Yellow
-    continue
+  $now = (Get-Date).ToUniversalTime().ToString('o')
+  $courses = for ($index = 0; $index -lt $urls.Count; $index++) {
+    [pscustomobject]@{ Number = $index + 1; Url = $urls[$index]; Status = 'pending'; Reason = $null; LastExitCode = $null; LastLog = $null; UpdatedAt = $now }
   }
-  if ($courseQueue.Contains($courseUrl)) {
-    Write-Host 'URL tersebut sudah ada dalam queue.' -ForegroundColor Yellow
-    continue
-  }
-
-  [void]$courseQueue.Add($courseUrl)
-  Write-Host ("Ditambahkan. Total queue: {0}" -f $courseQueue.Count) -ForegroundColor Green
+  $queueState = [pscustomobject]@{ version = 1; createdAt = $now; updatedAt = $now; courses = @($courses) }
+  $courseQueue = @($queueState.courses)
+  Save-QueueState -State $queueState
 }
 
 $maxPasses = 3
@@ -56,17 +110,22 @@ if ($env:AUTO_PASSES) {
   $maxPasses = $parsedPasses
 }
 
-$logDir = Join-Path $projectRoot 'logs'
-New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $results = [System.Collections.Generic.List[object]]::new()
 
 for ($courseIndex = 0; $courseIndex -lt $courseQueue.Count; $courseIndex++) {
-  $courseUrl = $courseQueue[$courseIndex]
-  $courseNumber = $courseIndex + 1
+  $courseEntry = $courseQueue[$courseIndex]
+  if ($courseEntry.Status -eq 'completed') { continue }
+  $courseUrl = $courseEntry.Url
+  $courseNumber = $courseEntry.Number
   $courseSlug = ([Uri]$courseUrl).AbsolutePath.Trim('/').Split('/')[1]
   $lastResult = 2
   $completed = $false
+  $blocked = $false
+
+  $courseEntry.Status = 'running'
+  $courseEntry.UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')
+  Save-QueueState -State $queueState
 
   Write-Host ''
   Write-Host ("=== Course {0}/{1}: {2} ===" -f $courseNumber, $courseQueue.Count, $courseUrl) -ForegroundColor Cyan
@@ -82,16 +141,28 @@ for ($courseIndex = 0; $courseIndex -lt $courseQueue.Count; $courseIndex++) {
     } finally {
       $ErrorActionPreference = $previousErrorActionPreference
     }
+    $courseEntry.LastExitCode = $lastResult
+    $courseEntry.LastLog = $passLog
+    $lastDiagnostic = [string](Get-Content -LiteralPath $passLog -Tail 40 | Where-Object { $_ -match 'failed:|Error:|SECURITY_CHALLENGE_DETECTED|belum siap|tidak ditemukan|tidak tersedia' } | Select-Object -Last 1)
+    $courseEntry.UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    Save-QueueState -State $queueState
 
     if ($lastResult -eq 0) {
       $completed = $true
       break
     }
     if ($lastResult -eq 3) {
-      Write-Host 'Security challenge terdeteksi. Queue dihentikan agar verifikasi dapat diselesaikan secara manual.' -ForegroundColor Red
-      exit 3
+      $blocked = $true
+      $courseEntry.Reason = [string](Get-Content -LiteralPath $passLog -Tail 30 | Where-Object { $_ -match 'SECURITY_CHALLENGE_DETECTED' } | Select-Object -Last 1)
+      if (-not $courseEntry.Reason) { $courseEntry.Reason = 'Security challenge terkonfirmasi.' }
+      Write-Warning ("Course {0} diblokir dan dilewati. Queue dilanjutkan; detail: {1}" -f $courseNumber, $passLog)
+      break
     }
     if ($lastResult -eq 4) {
+      $courseEntry.Status = 'configuration-error'
+      $courseEntry.Reason = 'PLAYWRIGHT_MCP_EXTENSION_TOKEN belum tersedia.'
+      Save-QueueState -State $queueState
+      Save-ProblemReport -State $queueState
       Write-Host 'PLAYWRIGHT_MCP_EXTENSION_TOKEN belum tersedia di .env. Queue dihentikan.' -ForegroundColor Red
       exit 4
     }
@@ -102,21 +173,34 @@ for ($courseIndex = 0; $courseIndex -lt $courseQueue.Count; $courseIndex++) {
   }
 
   if ($completed) {
+    $courseEntry.Status = 'completed'
+    $courseEntry.Reason = $null
+    $courseEntry.UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')
     Write-Host ("Course {0}/{1} selesai. Melanjutkan queue berikutnya." -f $courseNumber, $courseQueue.Count) -ForegroundColor Green
     [void]$results.Add([pscustomobject]@{ Number = $courseNumber; Url = $courseUrl; Status = 'Selesai' })
+  } elseif ($blocked) {
+    $courseEntry.Status = 'blocked'
+    $courseEntry.UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    [void]$results.Add([pscustomobject]@{ Number = $courseNumber; Url = $courseUrl; Status = 'Diblokir; dilewati' })
   } else {
+    $courseEntry.Status = 'incomplete'
+    $courseEntry.Reason = if ($lastDiagnostic) { $lastDiagnostic } else { "Belum tuntas setelah $maxPasses pass (exit code $lastResult)." }
+    $courseEntry.UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')
     Write-Warning ("Course {0}/{1} belum tuntas setelah {2} pass. Queue tetap dilanjutkan." -f $courseNumber, $courseQueue.Count, $maxPasses)
     [void]$results.Add([pscustomobject]@{ Number = $courseNumber; Url = $courseUrl; Status = "Belum tuntas (code $lastResult)" })
   }
+  Save-QueueState -State $queueState
+  Save-ProblemReport -State $queueState
 }
 
 Write-Host ''
 Write-Host '=== Ringkasan queue ===' -ForegroundColor Cyan
 $results | Format-Table Number, Status, Url -AutoSize
 
-$unfinished = @($results | Where-Object Status -ne 'Selesai').Count
+$unfinished = @($queueState.courses | Where-Object Status -ne 'completed').Count
 if ($unfinished -gt 0) {
-  Write-Host ("{0} course belum tuntas. Jalankan kembali dan masukkan URL tersebut untuk melanjutkan checkpoint." -f $unfinished) -ForegroundColor Yellow
+  Write-Host ("{0} course belum tuntas. Queue tersimpan dan akan dilanjutkan otomatis saat npm start berikutnya." -f $unfinished) -ForegroundColor Yellow
+  Write-Host ("Laporan masalah: {0}" -f $problemReportFile) -ForegroundColor Yellow
   exit 2
 }
 

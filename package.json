@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-auto.ps1",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@playwright/cli": "^0.1.22",
