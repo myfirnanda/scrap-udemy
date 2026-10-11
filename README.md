@@ -46,7 +46,7 @@ flowchart TD
 - Node.js 22 LTS direkomendasikan.
 - Google Chrome.
 - Akun Udemy yang mempunyai akses ke course.
-- [Playwright Extension resmi](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm), extension ID `mmlmfjhmonkocbjadbfplnigmagldckm`.
+- [Playwright Extension resmi di Chrome Web Store](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm).
 
 ## Instalasi
 
@@ -59,55 +59,19 @@ Copy-Item .env.example .env
 
 Repository GitHub bersifat private, jadi akun GitHub yang melakukan clone harus mempunyai akses.
 
-### Mendapatkan token Playwright Extension
+### Pasang extension dan ambil token
 
-1. Buka Chrome menggunakan profil yang menyimpan login Udemy.
-2. Pasang Playwright Extension resmi pada profil tersebut.
+1. Klik **[Playwright Extension di Chrome Web Store](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm)**.
+2. Klik **Add to Chrome**, lalu selesaikan pemasangan.
 3. Klik ikon **Extensions** berbentuk puzzle pada toolbar Chrome.
-4. Buka **Playwright Extension**.
-5. Salin nilai `PLAYWRIGHT_MCP_EXTENSION_TOKEN` yang ditampilkan oleh extension.
-6. Tempel nilainya ke `.env`:
+4. Buka **Playwright Extension** dan salin nilai `PLAYWRIGHT_MCP_EXTENSION_TOKEN` yang ditampilkan.
+5. Tempel nilainya ke file `.env`:
 
    ```dotenv
    PLAYWRIGHT_MCP_EXTENSION_TOKEN=tempel-token-di-sini
-   PLAYWRIGHT_MCP_PROFILE_DIR_NAME=Default
    ```
 
-Token bersifat khusus untuk profil Chrome. Untuk memastikan nama profil:
-
-1. Buka `chrome://version`.
-2. Cari **Profile Path**.
-3. Gunakan nama direktori paling akhir, misalnya `Default`, `Profile 1`, atau `Profile 2`.
-
-Contoh jika Profile Path berakhir dengan `Profile 2`:
-
-```dotenv
-PLAYWRIGHT_MCP_PROFILE_DIR_NAME=Profile 2
-```
-
-Verifikasi `.env` tanpa menampilkan isi token:
-
-```powershell
-node -e "process.loadEnvFile('.env'); console.log({ tokenConfigured: Boolean(process.env.PLAYWRIGHT_MCP_EXTENSION_TOKEN), profile: process.env.PLAYWRIGHT_MCP_PROFILE_DIR_NAME })"
-```
-
 Token menghubungkan Playwright CLI ke extension tanpa dialog **Allow & select** pada setiap koneksi normal. Jangan commit atau membagikan token tersebut.
-
-## Konfigurasi
-
-| Variabel | Default | Kegunaan |
-| --- | --- | --- |
-| `PLAYWRIGHT_MCP_EXTENSION_TOKEN` | Wajib | Token dari UI Playwright Extension. |
-| `PLAYWRIGHT_MCP_PROFILE_DIR_NAME` | Deteksi otomatis | Nama direktori profil Chrome, misalnya `Default`. |
-| `OUTPUT_DIR` | `output` | Folder utama hasil scraping. |
-| `MAX_LECTURE_ATTEMPTS` | `3` | Percobaan per lecture, nilai `1` sampai `10`. |
-
-Jumlah pass keseluruhan defaultnya tiga. Untuk mengubahnya pada terminal saat ini:
-
-```powershell
-$env:AUTO_PASSES = '5'
-npm start
-```
 
 ## Penggunaan
 
@@ -131,7 +95,7 @@ https://www.udemy.com/course/<slug>/learn/
 https://www.udemy.com/course/<slug>/learn/lecture/<id>
 ```
 
-URL harus memakai `https://www.udemy.com/course/...`. Setelah proses selesai atau batas retry tercapai, terminal berhenti sendiri.
+URL harus memakai `https://www.udemy.com/course/...`. Setelah proses selesai atau gagal, terminal berhenti sendiri.
 
 Chrome utama dan tab lain tidak ditutup. Popup yang dibuat oleh resource eksternal dapat ditutup setelah URL-nya dicatat.
 
@@ -139,9 +103,8 @@ Chrome utama dan tab lain tidak ditutup. Popup yang dibuat oleh resource ekstern
 
 | Command | Kegunaan |
 | --- | --- |
-| `npm install` | Memasang dependency. |
+| `npm install` | Dijalankan sekali saat pertama menyiapkan project. |
 | `npm start` | Menjalankan seluruh workflow scraper. |
-| `npm run check` | Memeriksa TypeScript setelah source diubah. |
 
 ## Struktur output
 
@@ -188,28 +151,10 @@ Course sudah pernah ditranskrip: "Judul Course" oleh Nama Instructor.
 
 Course yang sudah dinyatakan lengkap belum diperiksa otomatis untuk materi baru yang ditambahkan Udemy setelahnya. Untuk melakukan pengambilan ulang penuh, pindahkan folder course lama keluar dari `output/` sebagai backup lalu jalankan kembali.
 
-## Status dan exit code
-
-| Status | Arti |
-| --- | --- |
-| `completed` | Konten berhasil disimpan. |
-| `pending` | Belum diproses. |
-| `failed` | Gagal dan dapat dicoba lagi. |
-| `skipped` | Tidak didukung atau tidak tersedia; dianggap status akhir. |
-
-| Exit code | Arti |
-| ---: | --- |
-| `0` | Selesai atau course sudah lengkap. |
-| `1` | Input atau proses awal gagal. |
-| `2` | Masih ada item belum selesai setelah semua pass. |
-| `3` | CAPTCHA/security challenge terdeteksi. |
-| `4` | Token extension belum dikonfigurasi. |
-
 ## Kelebihan dan keterbatasan
 
 ### Kelebihan
 
-- Tidak memakai CDP atau profil browser sementara.
 - Menggunakan sesi login Chrome yang sudah ada.
 - Tidak memakai token atau API LLM.
 - Resume tersedia pada level lecture dan attachment.
@@ -230,13 +175,13 @@ Course yang sudah dinyatakan lengkap belum diperiksa otomatis untuk materi baru 
 
 | Masalah | Tindakan |
 | --- | --- |
-| Extension tidak ditemukan | Pastikan extension resmi terpasang dan aktif pada profil yang benar. |
+| Extension tidak ditemukan | Pasang extension melalui link Chrome Web Store di bagian instalasi. |
 | Token tidak tersedia | Isi `PLAYWRIGHT_MCP_EXTENSION_TOKEN` pada `.env`. |
-| Koneksi timeout | Pastikan token dan `PLAYWRIGHT_MCP_PROFILE_DIR_NAME` berasal dari profil yang sama. |
-| Belum login | Login ke Udemy pada profil Chrome tersebut lalu jalankan ulang. |
+| Koneksi timeout | Buka extension, salin ulang token, perbarui `.env`, lalu jalankan ulang. |
+| Belum login | Login ke Udemy di Chrome lalu jalankan ulang. |
 | Proses terputus | Jalankan `npm start` dengan URL yang sama; jangan hapus manifest. |
 | Existing course belum memiliki resource | Jalankan ulang URL yang sama; resource lama akan dimigrasikan. |
-| Exit code `2` | Periksa `logs/`, `scraping_log.json`, manifest, dan folder `_debug/`. |
+| Proses belum selesai | Periksa `logs/`, `scraping_log.json`, manifest, dan folder `_debug/`. |
 | CAPTCHA/security challenge | Selesaikan secara manual di Chrome lalu jalankan ulang. |
 
 ## Keamanan
