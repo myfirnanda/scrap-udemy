@@ -13,8 +13,12 @@ export async function cli(args: string[], timeout = 30_000): Promise<string> {
     });
     return stdout.trim();
   } catch (error) {
-    const failure = error as Error & { stdout?: string; stderr?: string };
-    throw new Error((failure.stdout || failure.stderr || failure.message).trim().slice(0, 3000));
+    const failure = error as Error & { stdout?: string; stderr?: string; killed?: boolean; signal?: string; code?: string | number };
+    const output = (failure.stdout || failure.stderr || '').trim();
+    const diagnostic = failure.killed
+      ? `Playwright CLI melewati timeout ${timeout} ms${failure.signal ? ` (${failure.signal})` : ''}`
+      : `Playwright CLI gagal${failure.code !== undefined ? ` (code ${failure.code})` : ''}`;
+    throw new Error(`${diagnostic}${output ? `: ${output}` : `: ${failure.message}`}`.slice(0, 3000));
   }
 }
 export async function runCode<T>(source: string, timeout = 120_000): Promise<T> {

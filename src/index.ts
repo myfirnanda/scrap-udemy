@@ -131,7 +131,7 @@ async function extract(lecture: Lecture): Promise<{ content: string | null; reas
   let retryReason: string | null = null;
   for (const type of types) {
     if (type === 'video') {
-      const result = await runCodeFile<TextResult>('scripts/extract-transcript.js');
+      const result = await runCodeFile<TextResult>('scripts/extract-transcript.js', 90_000);
       if (result.availability === 'retryable') {
         retryReason = result.reason ?? 'Transcript belum siap.';
         if (lecture.type !== 'unknown') throw new TransientContentError(retryReason);

@@ -12,8 +12,12 @@ async (page) => {
   const scroll = page.locator('[data-purpose="sidebar-content"]');
   await scroll.evaluate(el => { el.scrollTop = 0; });
   let all = [];
-  let endStable = 0;
-  let lastHeight = 0;
+  let tailStable = 0;
+  let noProgress = 0;
+  let lastTailKey = '';
+  let previousTotal = 0;
+  const startedAt = Date.now();
+  const maxDurationMs = 60000;
   const readCues = () => panel.locator('[data-purpose="cue-text"]').evaluateAll(nodes => nodes.map(node => {
     const text = (node.textContent || '').trim().replace(/\s+/g, ' ');
     const container = node.closest('button, [data-purpose*="cue"]');
@@ -21,17 +25,21 @@ async (page) => {
       .filter(Boolean).join('|').trim().replace(/\s+/g, ' ');
     return { key: marker || text, text };
   }).filter(cue => cue.text));
-  for (let step = 0; step < 1000; step++) {
-    const snapshot = await readCues();
+  const appendSnapshot = snapshot => {
     let overlap = 0;
     for (let size = Math.min(all.length, snapshot.length); size > 0; size--) {
       if (all.slice(-size).every((cue, i) => cue.key === snapshot[i].key)) { overlap = size; break; }
     }
     all.push(...snapshot.slice(overlap));
-    const state = await scroll.evaluate(el => {
-      const old = el.scrollTop;
+  };
+  for (let step = 0; step < 300; step++) {
+    if (Date.now() - startedAt > maxDurationMs) {
+      throw new Error('Transcript belum stabil dalam batas waktu 60 detik.');
+    }
+    const snapshot = await readCues();
+    appendSnapshot(snapshot);
+    await scroll.evaluate(el => {
       el.scrollTop = Math.min(el.scrollTop + Math.max(200, el.clientHeight * .7), el.scrollHeight);
-      return { moved: el.scrollTop > old, end: el.scrollTop >= el.scrollHeight - el.clientHeight - 2, height: el.scrollHeight };
     });
     // Udemy renders transcript cues lazily after scrolling. Poll for a stable
     // DOM instead of always sleeping the full 150 ms.
@@ -47,10 +55,18 @@ async (page) => {
       previousCount = count;
       previousHeight = height;
     }
-    endStable = state.end && !state.moved && state.height === lastHeight ? endStable + 1 : 0;
-    lastHeight = state.height;
-    if (endStable >= 3) break;
-    if (step === 999) throw new Error('Transcript belum mencapai akhir setelah 1000 scroll.');
+    const settledSnapshot = await readCues();
+    appendSnapshot(settledSnapshot);
+    const settled = await scroll.evaluate(el => ({
+      end: el.scrollTop >= el.scrollHeight - el.clientHeight - 2
+    }));
+    const tailKey = settledSnapshot.at(-1)?.key ?? '';
+    tailStable = settled.end && tailKey && tailKey === lastTailKey ? tailStable + 1 : 0;
+    noProgress = all.length === previousTotal ? noProgress + 1 : 0;
+    lastTailKey = tailKey;
+    previousTotal = all.length;
+    if (tailStable >= 3 || noProgress >= 8) break;
+    if (step === 299) throw new Error('Transcript belum mencapai akhir setelah 300 scroll.');
   }
   const finalSnapshot = await readCues();
   let finalOverlap = 0;
