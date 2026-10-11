@@ -1,0 +1,9 @@
+node_modules/
+dist/
+output/
+.chrome-profile/
+.playwright-cli/
+logs/
+.env
+.env.*
+!.env.example
