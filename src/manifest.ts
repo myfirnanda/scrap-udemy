@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { existsNonempty, relativeFile, writeJsonAtomic } from './utils.js';
+import { isArabicTranscript } from './transcript-language.js';
 
 export type LectureType = 'video' | 'article' | 'resource' | 'quiz' | 'exercise' | 'unknown';
 export type Status = 'pending' | 'completed' | 'unavailable' | 'skipped' | 'failed';
@@ -36,6 +37,7 @@ export interface Lecture {
     firstCue: string | null;
     lastCue: string | null;
     extractedAt: string;
+    language?: string;
   } | null;
 }
 export interface Section { number: number; title: string; id: string | null; lectures: Lecture[] }
@@ -85,7 +87,7 @@ export async function isCourseComplete(root: string, manifest: Manifest): Promis
     for (const lecture of section.lectures) {
       if (lecture.status === 'pending' || lecture.status === 'failed') return false;
       if (lecture.status === 'skipped' && lecture.type !== 'quiz' && lecture.type !== 'exercise') return false;
-      if (lecture.status === 'completed' && (!lecture.outputFile || !await existsNonempty(path.join(root, lecture.outputFile)))) return false;
+      if (lecture.status === 'completed' && (!lecture.outputFile || !await isReusableOutput(root, lecture.outputFile, lecture.type))) return false;
       if (lecture.attachmentsScanned !== true) return false;
       if (lecture.hasResources && (!(lecture.attachments?.length) || lecture.attachments.some(attachment => !attachment.kind))) return false;
       for (const attachment of lecture.attachments ?? []) {
@@ -115,7 +117,7 @@ export async function reconcileManifest(fresh: Manifest, previous: Manifest | nu
         ? oldSection.lectures.find(candidate => candidate.id === lecture.id)
         : null) ?? oldSection.lectures[lecture.number - 1];
       if (!old || (old.id && lecture.id && old.id !== lecture.id)) continue;
-      if (old.status === 'completed' && old.outputFile && await existsNonempty(path.join(root, old.outputFile))) {
+      if (old.status === 'completed' && old.outputFile && await isReusableOutput(root, old.outputFile, lecture.type)) {
         lecture.status = 'completed';
         lecture.outputFile = old.outputFile;
         lecture.transcriptMeta = old.transcriptMeta ?? null;
@@ -128,7 +130,7 @@ export async function reconcileManifest(fresh: Manifest, previous: Manifest | nu
       }
       if (lecture.status === 'pending') {
         const recoveredOutput = plannedFile(section, lecture);
-        if (await existsNonempty(path.join(root, recoveredOutput))) {
+        if (await isReusableOutput(root, recoveredOutput, lecture.type)) {
           lecture.status = 'completed';
           lecture.reason = null;
           lecture.outputFile = recoveredOutput;
@@ -155,6 +157,13 @@ export async function reconcileManifest(fresh: Manifest, previous: Manifest | nu
     }
   }
   return fresh;
+}
+
+async function isReusableOutput(root: string, relative: string, type: LectureType): Promise<boolean> {
+  const file = path.join(root, relative);
+  if (!await existsNonempty(file)) return false;
+  if (type !== 'video') return true;
+  return !isArabicTranscript(await fs.readFile(file, 'utf8'));
 }
 
 export function plannedFile(section: Section, lecture: Lecture): string {

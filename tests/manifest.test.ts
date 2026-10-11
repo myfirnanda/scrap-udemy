@@ -91,6 +91,21 @@ test('existing planned Markdown recovers a checkpoint lost from the manifest', a
   }
 });
 
+test('saved Arabic video transcript is invalidated so it can be extracted again in English', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'udemy-manifest-arabic-test-'));
+  try {
+    await fs.writeFile(path.join(root, 'arabic.md'), 'هذا نص عربي طويل بما يكفي لاكتشاف أن ملف الترجمة يحتاج إلى إعادة المعالجة.');
+    const previous = manifest(lecture({ status: 'completed', outputFile: 'arabic.md' }));
+    const fresh = manifest(lecture({ status: 'pending' }));
+
+    const reconciled = await reconcileManifest(fresh, previous, root);
+    assert.equal(reconciled.sections[0].lectures[0].status, 'pending');
+    assert.equal(reconciled.sections[0].lectures[0].outputFile, null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('course URL recovers a folder created with an incorrect page heading', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'udemy-course-url-test-'));
   try {

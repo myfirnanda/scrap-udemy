@@ -9,6 +9,7 @@ export type TranscriptBatch = {
   duration?: number | null;
   steps?: number;
   complete?: boolean;
+  language?: string;
 };
 
 export function appendTranscriptCues(all: TranscriptCue[], snapshot: TranscriptCue[]): void {

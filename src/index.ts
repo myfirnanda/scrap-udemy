@@ -9,13 +9,14 @@ import { LiveLine } from './live-line.js';
 import { installConsoleLogFile } from './logging.js';
 import { appendTranscriptCues, transcriptCompletedLine, transcriptPercent, transcriptProgressLine, type TranscriptBatch, type TranscriptCue } from './transcript-progress.js';
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
+import { isArabicTranscript } from './transcript-language.js';
 
 installConsoleLogFile(process.env.RUN_LOG_FILE);
 
 type Mode = 'lecture' | 'section' | 'all';
 type Availability = 'available' | 'unavailable' | 'retryable';
 type HtmlResult = { html: string | null; reason: string | null; availability?: Availability };
-type TextResult = { content: string | null; reason: string | null; availability?: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null };
+type TextResult = { content: string | null; reason: string | null; availability?: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string };
 type LogEntry = { time: string; section: number; lecture: number; status: string; reason?: string; attachmentReason?: string };
 type CourseIdentity = { courseTitle: string; courseOwner: string; courseUrl: string };
 type DiscoveredAttachment = { sourceIndex: number; name: string; href: string; kind: 'download' | 'external' | 'unknown' };
@@ -162,6 +163,7 @@ async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResul
   let totalSteps = 0;
   let percent = 0;
   let duration: number | null | undefined;
+  let language: string | undefined;
   try {
     progressLine.update('      Transcript [menyiapkan] membuka panel dan membaca durasi video...');
     let batch = await runCodeFile<TranscriptBatch>('scripts/init-transcript.js');
@@ -171,6 +173,7 @@ async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResul
       return { content: null, availability: batch.availability, reason: batch.reason };
     }
     appendTranscriptCues(cues, batch.cues ?? []);
+    language = batch.language;
     duration = batch.duration;
     progressLine.update(transcriptProgressLine(transcriptPercent(batch, percent), cues.length, batchNumber, (Date.now() - started) / 1000, duration));
 
@@ -197,11 +200,14 @@ async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResul
       activeTranscriptLine = null;
       return { content: null, availability: 'unavailable', reason: 'Panel transcript tersedia tetapi tidak memiliki cue.' };
     }
+    const content = cues.map(cue => cue.text).join('\n\n') + '\n';
+    if (isArabicTranscript(content)) throw new TransientContentError('Transcript masih berbahasa Arab setelah pemilihan caption English.');
     return {
-      content: cues.map(cue => cue.text).join('\n\n') + '\n',
+      content,
       cueCount: cues.length,
       firstCue: cues[0]?.text ?? null,
       lastCue: cues.at(-1)?.text ?? null,
+      language,
       availability: 'available',
       reason: null
     };
@@ -210,7 +216,7 @@ async function extractVideoTranscript(progressLine: LiveLine): Promise<TextResul
   }
 }
 
-async function extract(lecture: Lecture, progressLine: LiveLine): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null }> {
+async function extract(lecture: Lecture, progressLine: LiveLine): Promise<{ content: string | null; reason: string | null; type: Lecture['type']; availability: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string }> {
   const types = lecture.type === 'unknown' ? (['article', 'video', 'resource'] as const) : [lecture.type];
   let retryReason: string | null = null;
   for (const type of types) {
@@ -221,7 +227,7 @@ async function extract(lecture: Lecture, progressLine: LiveLine): Promise<{ cont
         if (lecture.type !== 'unknown') throw new TransientContentError(retryReason);
         continue;
       }
-      if (result.content?.trim()) return { content: result.content, reason: null, type, availability: 'available', cueCount: result.cueCount, firstCue: result.firstCue, lastCue: result.lastCue };
+      if (result.content?.trim()) return { content: result.content, reason: null, type, availability: 'available', cueCount: result.cueCount, firstCue: result.firstCue, lastCue: result.lastCue, language: result.language };
       if (lecture.type !== 'unknown') return { content: null, reason: result.reason, type, availability: 'unavailable' };
     } else if (type === 'article' || type === 'resource') {
       const result = await runCodeFile<HtmlResult>(`scripts/extract-${type}.js`);
@@ -502,7 +508,8 @@ async function main(): Promise<void> {
                 cueCount: result.cueCount,
                 firstCue: result.firstCue ?? null,
                 lastCue: result.lastCue ?? null,
-                extractedAt: new Date().toISOString()
+                extractedAt: new Date().toISOString(),
+                language: result.language
               } : null;
             }
           }

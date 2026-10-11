@@ -9,6 +9,7 @@ Automasi menggunakan Chrome yang sudah login, Playwright CLI, dan [Playwright Ex
 ## Fitur
 
 - Transcript video, article, dan resource teks disimpan sebagai Markdown.
+- Transcript beraksara Arab otomatis dialihkan ke caption English Udemy sebelum disimpan.
 - Banyak attachment dalam satu lecture dapat diunduh.
 - Link eksternal disimpan terpisah dalam `00_EXTERNAL_RESOURCES.md`.
 - Struktur output mengikuti course, section, dan lecture.
@@ -204,6 +205,7 @@ Saat URL dijalankan kembali, curriculum terbaru dibandingkan dengan manifest. Le
 - Workflow utama dibuat untuk Windows/PowerShell.
 - Bergantung pada struktur DOM Udemy yang dapat berubah.
 - Transcript hanya tersedia jika disediakan oleh Udemy.
+- Jika transcript Arab tidak memiliki pilihan caption English, lecture dicatat gagal agar teks Arab tidak disimpan sebagai hasil akhir.
 - Transcript tidak menyertakan timestamp atau speaker.
 - Video, audio, quiz, dan exercise interaktif tidak diekspor.
 - Pemrosesan masih berurutan, belum paralel.
