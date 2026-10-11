@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { isCourseComplete, reconcileManifest, type Lecture, type Manifest } from '../src/manifest.js';
+import { findExistingCourse, isCourseComplete, reconcileManifest, type Lecture, type Manifest } from '../src/manifest.js';
 
 function manifest(lecture: Lecture): Manifest {
   return { courseTitle: 'Test', courseUrl: 'https://www.udemy.com/course/test/learn/', sections: [{ number: 1, title: 'One', id: null, lectures: [lecture] }] };
@@ -86,6 +86,25 @@ test('existing planned Markdown recovers a checkpoint lost from the manifest', a
     const reconciled = await reconcileManifest(fresh, manifest(lecture({ status: 'pending' })), root);
     assert.equal(reconciled.sections[0].lectures[0].status, 'completed');
     assert.equal(reconciled.sections[0].lectures[0].outputFile, path.join('1_One', '1_Lecture.md'));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('course URL recovers a folder created with an incorrect page heading', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'udemy-course-url-test-'));
+  try {
+    const folder = path.join(root, 'incorrect-heading');
+    await fs.mkdir(folder);
+    await fs.writeFile(path.join(folder, 'course_manifest.json'), JSON.stringify({
+      ...manifest(lecture({ status: 'pending' })),
+      courseTitle: 'Promotional lab heading',
+      courseOwner: 'Instructor',
+      fingerprint: 'wrong-fingerprint'
+    }));
+
+    const existing = await findExistingCourse(root, 'Correct Course Title', 'Instructor', 'https://www.udemy.com/course/test/learn/');
+    assert.equal(existing?.root, folder);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

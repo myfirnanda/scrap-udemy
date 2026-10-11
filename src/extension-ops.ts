@@ -23,11 +23,13 @@ function inspectPageBody(lectureId: string | null): string {
       const text = document.body.innerText.trim();
       const curriculum = !!document.querySelector('[data-purpose="curriculum-section-container"]');
       const expectedLecture = !expectedId || url.pathname.includes('/lecture/' + expectedId);
+      const standaloneLab = url.searchParams.get('cteMode') === 'standalone' && !!document.querySelector('video');
+      const coursePlayerReady = curriculum || (expectedLecture && standaloneLab);
       const challengeSelector = 'iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[src*="challenge"], [data-testid*="captcha"], form[action*="challenge"]';
       const decision = decidePageHealth({
         urlPath: url.pathname,
         title,
-        curriculumVisible: curriculum,
+        curriculumVisible: coursePlayerReady,
         expectedLecture,
         visibleChallengeElement: [...document.querySelectorAll(challengeSelector)].some(visible),
         shortChallengePage: text.length < 3000 && /verify you are human|security challenge|unusual traffic|enable javascript and cookies|you have been blocked/i.test(text)

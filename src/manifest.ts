@@ -61,6 +61,7 @@ export async function findExistingCourse(output: string, title: string, owner: s
   const wanted = courseFingerprint(title, owner);
   const exact: ExistingCourse[] = [];
   const legacy: ExistingCourse[] = [];
+  const sameUrl: ExistingCourse[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const root = path.join(output, entry.name);
@@ -70,8 +71,9 @@ export async function findExistingCourse(output: string, title: string, owner: s
     if (fingerprint === wanted) exact.push({ root, manifest, legacy: false });
     else if (!manifest.courseOwner && manifest.courseTitle === title && manifest.courseUrl === courseUrl)
       legacy.push({ root, manifest, legacy: true });
+    else if (manifest.courseUrl === courseUrl) sameUrl.push({ root, manifest, legacy: true });
   }
-  const matches = exact.length ? exact : legacy;
+  const matches = exact.length ? exact : legacy.length ? legacy : sameUrl;
   if (matches.length > 1) throw new Error(`Ditemukan lebih dari satu folder output untuk fingerprint course ${wanted}.`);
   return matches[0] ?? null;
 }

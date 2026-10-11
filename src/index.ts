@@ -61,7 +61,7 @@ function isRetryableLectureError(error: unknown): boolean {
   if (error instanceof SecurityChallengeError) return false;
   const message = String(error).toLowerCase();
   if (message.includes('security_challenge_detected')) return false;
-  return /timeout|timed out|net::|network|connection|target page|browser has been closed|disconnected/.test(message);
+  return /timeout|timed out|net::|network|connection|target page|browser has been closed|disconnected|modal state|beforeunload|json kosong|unexpected end of json/.test(message);
 }
 
 function needsExtensionReconnect(error: unknown): boolean {

@@ -1,8 +1,11 @@
 async (page) => {
-  const title = (await page.getByRole('heading', { level: 1 }).first().textContent())?.trim() ?? '';
+  const documentTitle = await page.title();
+  const titleFromDocument = documentTitle.match(/^Course:\s*(.*?)\s*\|\s*Udemy$/i)?.[1]?.trim() ?? '';
+  const titleFromHeading = (await page.locator('[data-purpose="course-title"], h1').first().textContent())?.trim() ?? '';
+  const title = titleFromDocument || titleFromHeading;
   let links = page.locator('[data-purpose="instructor-bio"] a[href*="/user/"]');
   if (!await links.count()) {
-    const overview = page.getByRole('tab', { name: 'Overview' }).first();
+    const overview = page.getByRole('tab', { name: /^(?:Overview|Gambaran Umum)$/i }).first();
     if (await overview.count()) await overview.evaluate(element => element.click());
     links = page.locator('[data-purpose="instructor-bio"] a[href*="/user/"]');
     await links.first().waitFor({ state: 'attached', timeout: 10000 }).catch(() => {});
