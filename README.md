@@ -183,25 +183,3 @@ Course yang sudah dinyatakan lengkap belum diperiksa otomatis untuk materi baru 
 | Existing course belum memiliki resource | Jalankan ulang URL yang sama; resource lama akan dimigrasikan. |
 | Proses belum selesai | Periksa `logs/`, `scraping_log.json`, manifest, dan folder `_debug/`. |
 | CAPTCHA/security challenge | Selesaikan secara manual di Chrome lalu jalankan ulang. |
-
-## Keamanan
-
-`.gitignore` mengecualikan data berikut dari Git:
-
-```text
-.env
-output/
-logs/
-node_modules/
-.playwright-cli/
-.chrome-profile/
-```
-
-Sebelum push, periksa:
-
-```powershell
-git status
-git check-ignore .env output logs
-```
-
-Jangan commit token extension, cookie/profil Chrome, output course, attachment, atau screenshot debug yang memuat informasi pribadi.
