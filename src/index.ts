@@ -12,6 +12,7 @@ import { LiveLine } from './live-line.js';
 import { installConsoleLogFile } from './logging.js';
 import { appendTranscriptCues, transcriptCompletedLine, transcriptPercent, transcriptProgressLine, type TranscriptBatch, type TranscriptCue } from './transcript-progress.js';
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
+import { attachmentIdentity, uniqueAttachments } from './attachment-identity.js';
 import { isArabicTranscript } from './transcript-language.js';
 import { shouldUseLocalWhisper, transcribeWithLocalWhisper } from './local-whisper.js';
 
@@ -23,7 +24,7 @@ type HtmlResult = { html: string | null; reason: string | null; availability?: A
 type TextResult = { content: string | null; reason: string | null; availability?: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string; source?: 'udemy' | 'whisper-local'; sourceLanguage?: string };
 type LogEntry = { time: string; section: number; lecture: number; status: string; reason?: string; attachmentReason?: string };
 type CourseIdentity = { courseTitle: string; courseOwner: string; courseUrl: string };
-type DiscoveredAttachment = { sourceIndex: number; name: string; href: string; kind: 'download' | 'external' | 'unknown' };
+type DiscoveredAttachment = { sourceIndex: number; resourceId?: string | null; name: string; href: string; kind: 'download' | 'external' | 'unknown' };
 type DownloadResult = { kind: 'downloaded' | 'direct' | 'external' | 'retryable' | 'skipped'; suggestedFilename?: string; url?: string; reason?: string };
 type TabVerification = { url: string; title: string; curriculum: boolean; authRequired: boolean };
 
@@ -261,15 +262,18 @@ async function syncAttachments(root: string, section: Section, lecture: Lecture,
     return;
   }
 
-  const discovered = await runCode<DiscoveredAttachment[]>(discoverAttachmentsCode(section.number - 1, lecture.number - 1));
+  const discovered = uniqueAttachments(await runCode<DiscoveredAttachment[]>(discoverAttachmentsCode(section.number - 1, lecture.number - 1)));
   const previous = lecture.attachments ?? [];
   const attachments: Attachment[] = [];
   for (const item of discovered) {
-    const old = previous.find(entry => entry.sourceIndex === item.sourceIndex);
+    const identity = attachmentIdentity(item);
+    const old = previous.find(entry => attachmentIdentity(entry) === identity)
+      ?? previous.find(entry => entry.sourceIndex === item.sourceIndex);
     const unavailable = old?.status === 'unavailable' && old.kind !== undefined && item.kind !== 'external';
     const complete = old?.status === 'completed' && old.outputFile && await existsNonempty(path.join(root, old.outputFile));
     attachments.push({
       sourceIndex: item.sourceIndex,
+      resourceId: item.resourceId ?? old?.resourceId ?? null,
       name: old?.name || item.name,
       href: item.href,
       kind: item.kind,

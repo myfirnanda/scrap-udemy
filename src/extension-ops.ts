@@ -125,11 +125,13 @@ function attachmentLocators(sectionIndex: number, lectureIndex: number): string 
       const link = links.nth(index);
       const info = await link.evaluate((element, sourceIndex) => {
         const href = element instanceof HTMLAnchorElement ? element.href : '';
+        const elementId = element.getAttribute('id');
+        const resourceId = elementId?.startsWith('resource-dropdown-') ? elementId.slice('resource-dropdown-'.length) : null;
         const text = (element.textContent || '').replace(/Loading/gi, '').trim().replace(/\\s+/g, ' ');
         const marker = [element.getAttribute('data-purpose'), element.getAttribute('aria-label'), element.getAttribute('title')].filter(Boolean).join(' ');
         const isDownload = element instanceof HTMLButtonElement || (!(element instanceof HTMLAnchorElement) && element.getAttribute('role') === 'button') || element.hasAttribute('download') || /download|attachment/i.test(marker) || /\\/asset(s)?\\//i.test(href) || /\\.(zip|7z|rar|pdf|csv|json|txt|docx?|xlsx?|pptx?|ipynb|py|js|ts|html?|css)(?:[?#]|$)/i.test(href);
         const kind = isDownload ? 'download' : href ? 'external' : 'unknown';
-        return { sourceIndex, name: text || href.split('/').pop()?.split('?')[0] || 'resource', href, kind };
+        return { sourceIndex, resourceId, name: text || href.split('/').pop()?.split('?')[0] || 'resource', href, kind };
       }, index);
       resources.push(info);
     }

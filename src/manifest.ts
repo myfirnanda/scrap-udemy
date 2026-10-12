@@ -10,6 +10,7 @@ export type AttachmentStatus = 'pending' | 'completed' | 'unavailable' | 'skippe
 export type AttachmentKind = 'download' | 'external' | 'unknown';
 export interface Attachment {
   sourceIndex: number;
+  resourceId?: string | null;
   name: string;
   href: string;
   kind?: AttachmentKind;
