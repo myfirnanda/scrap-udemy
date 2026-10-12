@@ -25,6 +25,10 @@ test('unsupported quiz is a valid terminal state', async () => {
   assert.equal(await isCourseComplete('.', manifest(lecture({ type: 'quiz', status: 'skipped', reason: 'Jenis lecture interaktif tidak didukung.' }))), true);
 });
 
+test('legacy skipped coding exercise is incomplete and will be exported', async () => {
+  assert.equal(await isCourseComplete('.', manifest(lecture({ type: 'exercise', status: 'skipped', reason: 'Jenis lecture interaktif tidak didukung.' }))), false);
+});
+
 test('confirmed unavailable transcript is a valid terminal state with warning', async () => {
   assert.equal(await isCourseComplete('.', manifest(lecture({ status: 'unavailable', reason: 'Video tidak menyediakan transcript.' }))), true);
 });

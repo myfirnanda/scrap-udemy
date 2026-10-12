@@ -15,12 +15,14 @@ import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir
 import { attachmentIdentity, uniqueAttachments } from './attachment-identity.js';
 import { isArabicTranscript } from './transcript-language.js';
 import { LocalWhisperUnavailableError, shouldUseLocalWhisper, transcribeWithLocalWhisper } from './local-whisper.js';
+import { exerciseToMarkdown, type ExerciseContent } from './exercise-markdown.js';
 
 installConsoleLogFile(process.env.RUN_LOG_FILE);
 
 type Mode = 'lecture' | 'section' | 'all';
 type Availability = 'available' | 'unavailable' | 'retryable';
 type HtmlResult = { html: string | null; reason: string | null; availability?: Availability };
+type ExerciseResult = { content: ExerciseContent | null; reason: string | null; availability?: Availability };
 type TextResult = { content: string | null; reason: string | null; availability?: Availability; cueCount?: number; firstCue?: string | null; lastCue?: string | null; language?: string; source?: 'udemy' | 'whisper-local'; sourceLanguage?: string };
 type LogEntry = { time: string; section: number; lecture: number; status: string; reason?: string; attachmentReason?: string };
 type CourseIdentity = { courseTitle: string; courseOwner: string; courseUrl: string };
@@ -160,6 +162,11 @@ function toMarkdown(html: string): string {
   return new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced' }).turndown(html).trim() + '\n';
 }
 
+function isExpectedLectureUrl(url: string, lectureId: string | null): boolean {
+  if (!lectureId) return true;
+  return new RegExp(`/(?:lecture|quiz)/${lectureId}(?:/|$)`).test(new URL(url).pathname);
+}
+
 async function extractVideoTranscript(progressLine: LiveLine, root: string, lecture: Lecture, allowLocalWhisper: boolean): Promise<TextResult> {
   progressLine.stopSpinner();
   const started = Date.now();
@@ -248,6 +255,11 @@ async function extract(lecture: Lecture, progressLine: LiveLine, root: string, a
       }
       if (result.content?.trim()) return { content: result.content, reason: null, type, availability: 'available', cueCount: result.cueCount, firstCue: result.firstCue, lastCue: result.lastCue, language: result.language, source: result.source, sourceLanguage: result.sourceLanguage };
       if (lecture.type !== 'unknown') return { content: null, reason: result.reason, type, availability: 'unavailable' };
+    } else if (type === 'exercise') {
+      const result = await runCodeFile<ExerciseResult>('scripts/extract-exercise.js');
+      if (result.availability === 'retryable') throw new TransientContentError(result.reason ?? 'Latihan Coding belum siap.');
+      if (result.content) return { content: exerciseToMarkdown(result.content, toMarkdown), reason: null, type, availability: 'available' };
+      return { content: null, reason: result.reason, type, availability: 'unavailable' };
     } else if (type === 'article' || type === 'resource') {
       const result = await runCodeFile<HtmlResult>(`scripts/extract-${type}.js`);
       if (result.availability === 'retryable') {
@@ -488,7 +500,7 @@ async function main(): Promise<void> {
       if (config.mode === 'lecture' && attempted >= 1) break;
       attempted++;
       console.log(`  Lecture ${lecture.number}/${section.lectures.length}: ${lecture.title} [${lecture.type}]`);
-      if (lecture.type === 'quiz' || lecture.type === 'exercise') {
+      if (lecture.type === 'quiz') {
         lecture.status = 'skipped';
         lecture.reason = 'Jenis lecture interaktif tidak didukung.';
         if (!lecture.hasResources) {
@@ -512,7 +524,7 @@ async function main(): Promise<void> {
           let state = attempt === 1 && !lecture.isLab
             ? await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id))
             : await runCode<PageHealth>(restoreLectureCode(targetUrl, lecture.id));
-          if (attempt > 1 && !lecture.isLab && (state.state !== 'ready' || (lecture.id && !state.url.includes(`/lecture/${lecture.id}`)))) {
+          if (attempt > 1 && !lecture.isLab && (state.state !== 'ready' || !isExpectedLectureUrl(state.url, lecture.id))) {
             activeTranscriptLine.setSpinnerLabel(`Memilih kembali lecture target (${attempt}/${maxAttempts})...`);
             state = await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id));
           }
@@ -521,7 +533,7 @@ async function main(): Promise<void> {
             const confirmed = await runCode<PageHealth>(inspectPageHealthCode(lecture.id));
             if (confirmed.state === 'blocked') throw new SecurityChallengeError(confirmed.evidence);
           }
-          if (state.state !== 'ready' || (lecture.id && !state.url.includes(`/lecture/${lecture.id}`))) {
+          if (state.state !== 'ready' || !isExpectedLectureUrl(state.url, lecture.id)) {
             throw new TransientNavigationError(`Navigasi lecture belum siap: ${state.evidence.join(', ') || 'course-player-or-url-not-ready'}`);
           }
           stage = 'attachments';

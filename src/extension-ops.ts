@@ -29,7 +29,7 @@ function inspectPageBody(lectureId: string | null): string {
       const title = document.title.trim().toLowerCase();
       const text = document.body.innerText.trim();
       const curriculum = !!document.querySelector('[data-purpose="curriculum-section-container"]');
-      const expectedLecture = !expectedId || url.pathname.includes('/lecture/' + expectedId);
+      const expectedLecture = !expectedId || new RegExp('/(?:lecture|quiz)/' + expectedId + '(?:/|$)').test(url.pathname);
       const standaloneLab = url.searchParams.get('cteMode') === 'standalone' && !!document.querySelector('video');
       const coursePlayerReady = curriculum || (expectedLecture && standaloneLab);
       const challengeSelector = 'iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[src*="challenge"], [data-testid*="captcha"], form[action*="challenge"]';
@@ -77,7 +77,7 @@ export function navigateCode(sectionIndex: number, lectureIndex: number, lecture
         ? `await page.waitForFunction((id) => {
             const loader = document.querySelector('[class*="curriculum-item-view--loader"]');
             const loading = loader instanceof HTMLElement && loader.getClientRects().length > 0 && getComputedStyle(loader).visibility !== 'hidden';
-            return location.pathname.includes('/lecture/' + id) && !loading;
+            return new RegExp('/(?:lecture|quiz)/' + id + '(?:/|$)').test(location.pathname) && !loading;
           }, '${lectureId}', { timeout: 10000 });`
         : `await page.waitForFunction(() => {
             const loader = document.querySelector('[class*="curriculum-item-view--loader"]');
@@ -97,7 +97,7 @@ export function restoreLectureCode(lectureUrl: string, lectureId: string | null)
       await page.waitForFunction((id) => {
         const curriculum = document.querySelector('[data-purpose="curriculum-section-container"]');
         if (!curriculum) return false;
-        ${lectureId ? `if (!location.pathname.includes('/lecture/' + id)) return false;` : ''}
+        ${lectureId ? `if (!new RegExp('/(?:lecture|quiz)/' + id + '(?:/|$)').test(location.pathname)) return false;` : ''}
             const loader = document.querySelector('[class*="curriculum-item-view--loader"]');
             const loading = loader instanceof HTMLElement && loader.getClientRects().length > 0 && getComputedStyle(loader).visibility !== 'hidden';
         return !loading;

@@ -21,7 +21,7 @@ test('lecture recovery navigates directly to the exact lecture URL', () => {
 
   assert.match(code, /page\.goto\("https:\/\/www\.udemy\.com\/course\/example\/learn\/lecture\/12345"/);
   assert.match(code, /curriculum-section-container/);
-  assert.match(code, /location\.pathname\.includes\('\/lecture\/' \+ id\)/);
+  assert.match(code, /\(\?:lecture\|quiz\)\/.*id/);
 });
 
 test('resource downloads capture the Udemy signed asset URL', () => {
