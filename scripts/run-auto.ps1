@@ -64,7 +64,7 @@ if (Test-Path -LiteralPath $queueStateFile) {
   catch { Write-Warning 'Queue state lama tidak dapat dibaca; queue baru akan dibuat.' }
 }
 
-$unfinishedSaved = @(if ($queueState) { $queueState.courses | Where-Object Status -ne 'completed' })
+$unfinishedSaved = @(if ($queueState) { $queueState.courses | Where-Object { $_.Status -notin @('completed', 'skipped') } })
 if ($unfinishedSaved.Count -gt 0) {
   foreach ($course in $unfinishedSaved) {
     $course.Status = 'pending'
@@ -120,7 +120,7 @@ $results = [System.Collections.Generic.List[object]]::new()
 
 for ($courseIndex = 0; $courseIndex -lt $courseQueue.Count; $courseIndex++) {
   $courseEntry = $courseQueue[$courseIndex]
-  if ($courseEntry.Status -eq 'completed') { continue }
+  if ($courseEntry.Status -in @('completed', 'skipped')) { continue }
   $courseUrl = $courseEntry.Url
   $courseNumber = $courseEntry.Number
   $courseSlug = ([Uri]$courseUrl).AbsolutePath.Trim('/').Split('/')[1]
@@ -207,7 +207,7 @@ Write-Host ''
 Write-Host '=== Ringkasan queue ===' -ForegroundColor Cyan
 $results | Format-Table Number, Status, Url -AutoSize
 
-$unfinished = @($queueState.courses | Where-Object Status -ne 'completed').Count
+$unfinished = @($queueState.courses | Where-Object { $_.Status -notin @('completed', 'skipped') }).Count
 if ($unfinished -gt 0) {
   Write-Host ("{0} course belum tuntas. Queue tersimpan dan akan dilanjutkan otomatis saat npm start berikutnya." -f $unfinished) -ForegroundColor Yellow
   Write-Host ("Laporan masalah: {0}" -f $problemReportFile) -ForegroundColor Yellow
