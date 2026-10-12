@@ -509,9 +509,13 @@ async function main(): Promise<void> {
             : `Mengembalikan halaman lecture target (${attempt}/${maxAttempts})...`);
           const lectureTarget = lecture.url ?? (lecture.id ? new URL(`lecture/${lecture.id}`, courseUrl).toString() : courseUrl);
           const targetUrl = lecture.isLab ? normalCoursePlayerUrl(lectureTarget) : lectureTarget;
-          const state = attempt === 1 && !lecture.isLab
+          let state = attempt === 1 && !lecture.isLab
             ? await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id))
             : await runCode<PageHealth>(restoreLectureCode(targetUrl, lecture.id));
+          if (attempt > 1 && !lecture.isLab && (state.state !== 'ready' || (lecture.id && !state.url.includes(`/lecture/${lecture.id}`)))) {
+            activeTranscriptLine.setSpinnerLabel(`Memilih kembali lecture target (${attempt}/${maxAttempts})...`);
+            state = await runCode<PageHealth>(navigateCode(section.number - 1, lecture.number - 1, lecture.id));
+          }
           if (state.state === 'blocked') {
             await pause(1500);
             const confirmed = await runCode<PageHealth>(inspectPageHealthCode(lecture.id));
