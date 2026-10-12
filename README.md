@@ -213,7 +213,7 @@ Saat URL dijalankan kembali, curriculum terbaru dibandingkan dengan manifest. Le
 - Whisper lokal menggunakan CPU sehingga lebih lambat daripada transcript bawaan Udemy dan dapat salah mengenali istilah teknis.
 - Caption Arab tanpa pilihan English diterjemahkan ke English oleh Whisper lokal.
 - Transcript tidak menyertakan timestamp atau speaker.
-- Video dan audio tidak disimpan sebagai output. Latihan Coding diekspor sebagai Markdown berisi petunjuk, hint, dan starter file/TODO; solution dan evaluation test tidak disimpan. Quiz biasa tidak diekspor.
+- Video dan audio tidak disimpan sebagai output. Latihan Coding diekspor sebagai Markdown berisi petunjuk, hint, dan starter file/TODO; solution dan evaluation test tidak disimpan. Quiz biasa dan Role Play tidak diekspor.
 - Pemrosesan masih berurutan, belum paralel.
 
 ## Troubleshooting

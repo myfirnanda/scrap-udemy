@@ -20,13 +20,15 @@ async (page) => {
       const id = item.querySelector('[data-purpose="progress-toggle-button"]')?.getAttribute('aria-describedby')?.match(/(\d+)$/)?.[1] ?? null;
       const itemHref = item.querySelector('a[href*="/learn/"]')?.href ?? null;
       const isLab = !!item.querySelector('[data-purpose="lab-ribbon"]');
+      const isRolePlay = !!item.querySelector('[data-purpose="roleplay-ribbon"]') || /role\s*play/i.test(title);
       let type = 'unknown';
-      if (/quiz|kuis|practice test/i.test(title)) type = 'quiz';
-      else if (/coding exercise|latihan coding|assignment|role play/i.test(title) || /\/learn\/quiz\/\d+/.test(itemHref ?? '')) type = 'exercise';
+      if (isRolePlay) type = 'roleplay';
+      else if (/quiz|kuis|practice test/i.test(title)) type = 'quiz';
+      else if (/coding exercise|latihan coding|assignment/i.test(title) || /\/learn\/quiz\/\d+/.test(itemHref ?? '')) type = 'exercise';
       else if (icons.includes('#icon-video')) type = 'video';
       else if (icons.includes('#icon-article')) type = /resource|download|source code/i.test(title) ? 'resource' : 'article';
       const hasResources = !!item.querySelector('button[aria-label="Resource list"], button[data-purpose*="resource"], button[class*="resource"]');
-      const fallbackPath = type === 'exercise' ? `quiz/${id}` : `lecture/${id}`;
+      const fallbackPath = isRolePlay ? `role-play/${id}/?udfrontends=true&cteMode=standalone` : type === 'exercise' ? `quiz/${id}` : `lecture/${id}`;
       return { number: lectureIndex + 1, title, type, id, url: itemHref || (id ? new URL(fallbackPath, location.href.replace(/\/learn\/.*/, '/learn/')).href : null), status: 'pending', reason: null, outputFile: null, isLab, hasResources, attachmentsScanned: !hasResources, attachmentReason: null, attachments: [] };
     });
     return { number: sectionIndex + 1, title, id: section.getAttribute('data-purpose'), lectures };

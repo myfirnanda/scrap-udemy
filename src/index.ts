@@ -500,9 +500,9 @@ async function main(): Promise<void> {
       if (config.mode === 'lecture' && attempted >= 1) break;
       attempted++;
       console.log(`  Lecture ${lecture.number}/${section.lectures.length}: ${lecture.title} [${lecture.type}]`);
-      if (lecture.type === 'quiz') {
+      if (lecture.type === 'quiz' || lecture.type === 'roleplay') {
         lecture.status = 'skipped';
-        lecture.reason = 'Jenis lecture interaktif tidak didukung.';
+        lecture.reason = lecture.type === 'roleplay' ? 'Role Play tidak diekspor.' : 'Jenis lecture interaktif tidak didukung.';
         if (!lecture.hasResources) {
           lecture.attachments = [];
           lecture.attachmentsScanned = true;

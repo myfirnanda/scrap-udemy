@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsNonempty, relativeFile, writeJsonAtomic } from './utils.js';
 import { isArabicTranscript } from './transcript-language.js';
 
-export type LectureType = 'video' | 'article' | 'resource' | 'quiz' | 'exercise' | 'unknown';
+export type LectureType = 'video' | 'article' | 'resource' | 'quiz' | 'exercise' | 'roleplay' | 'unknown';
 export type Status = 'pending' | 'completed' | 'unavailable' | 'skipped' | 'failed';
 export type AttachmentStatus = 'pending' | 'completed' | 'unavailable' | 'skipped' | 'failed';
 export type AttachmentKind = 'download' | 'external' | 'unknown';
@@ -89,7 +89,7 @@ export async function isCourseComplete(root: string, manifest: Manifest): Promis
   for (const section of manifest.sections) {
     for (const lecture of section.lectures) {
       if (lecture.status === 'pending' || lecture.status === 'failed') return false;
-      if (lecture.status === 'skipped' && lecture.type !== 'quiz') return false;
+      if (lecture.status === 'skipped' && lecture.type !== 'quiz' && lecture.type !== 'roleplay') return false;
       if (lecture.status === 'completed' && (!lecture.outputFile || !await isReusableOutput(root, lecture.outputFile, lecture.type))) return false;
       if (lecture.attachmentsScanned !== true) return false;
       if (lecture.hasResources && (!(lecture.attachments?.length) || lecture.attachments.some(attachment => !attachment.kind))) return false;
@@ -127,7 +127,7 @@ export async function reconcileManifest(fresh: Manifest, previous: Manifest | nu
       } else if (old.status === 'unavailable') {
         lecture.status = 'unavailable';
         lecture.reason = old.reason;
-      } else if (old.status === 'skipped' && lecture.type === 'quiz') {
+      } else if (old.status === 'skipped' && (lecture.type === 'quiz' || lecture.type === 'roleplay')) {
         lecture.status = 'skipped';
         lecture.reason = old.reason;
       }
