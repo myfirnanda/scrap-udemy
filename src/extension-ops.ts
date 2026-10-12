@@ -154,13 +154,31 @@ export function downloadAttachmentCode(sectionIndex: number, lectureIndex: numbe
     if (attachment.kind === 'external' && attachment.href) {
       return { kind: 'external', url: attachment.href, reason: 'Tautan eksternal disimpan sebagai resource.' };
     }
+    if (attachment.kind === 'download' && attachment.href) {
+      return { kind: 'direct', url: attachment.href, suggestedFilename: attachment.name };
+    }
+    const resourceElement = links.nth(attachment.sourceIndex);
+    const resourceElementId = await resourceElement.getAttribute('id');
+    const resourceId = resourceElementId?.startsWith('resource-dropdown-') ? resourceElementId.slice('resource-dropdown-'.length) : null;
     const startUrl = page.url();
     const eventTimeout = 15000;
     const downloadPromise = page.waitForEvent('download', { timeout: eventTimeout }).then(download => ({ kind: 'download', download })).catch(() => ({ kind: 'none' }));
     const popupPromise = page.context().waitForEvent('page', { timeout: eventTimeout }).then(popup => ({ kind: 'external', popup })).catch(() => ({ kind: 'none' }));
     const navigationPromise = page.waitForURL(url => url.href !== startUrl, { timeout: eventTimeout }).then(() => ({ kind: 'navigation', url: page.url() })).catch(() => ({ kind: 'none' }));
-    await links.nth(attachment.sourceIndex).click({ force: true });
-    const event = await Promise.race([downloadPromise, popupPromise, navigationPromise, page.waitForTimeout(eventTimeout).then(() => ({ kind: 'none' }))]);
+    const signedUrlPromise = resourceId
+      ? page.waitForResponse(response => {
+          const url = new URL(response.url());
+          return response.status() === 200 && url.pathname.includes('/supplementary-assets/' + resourceId + '/') && url.searchParams.get('fields[asset]') === 'download_urls';
+        }, { timeout: eventTimeout }).then(async response => {
+          const body = await response.json();
+          const candidates = Object.values(body.download_urls ?? {}).flatMap(value => Array.isArray(value) ? value : [value]);
+          const selected = candidates.map(value => typeof value === 'string' ? { file: value, label: attachment.name } : value)
+            .find(value => value && typeof value.file === 'string' && value.file.toLowerCase().startsWith('https://'));
+          return selected ? { kind: 'direct', url: selected.file, suggestedFilename: selected.label || attachment.name } : { kind: 'none' };
+        }).catch(() => ({ kind: 'none' }))
+      : Promise.resolve({ kind: 'none' });
+    await resourceElement.evaluate(element => element.click());
+    const event = await Promise.race([signedUrlPromise, downloadPromise, popupPromise, navigationPromise, page.waitForTimeout(eventTimeout).then(() => ({ kind: 'none' }))]);
     if (event.kind === 'external') {
       await event.popup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
       const url = event.popup.url();
@@ -171,6 +189,9 @@ export function downloadAttachmentCode(sectionIndex: number, lectureIndex: numbe
       const url = event.url;
       await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
       return { kind: 'external', url, reason: 'Tautan eksternal disimpan sebagai resource.' };
+    }
+    if (event.kind === 'direct') {
+      return { kind: 'direct', url: event.url, suggestedFilename: event.suggestedFilename };
     }
     if (event.kind !== 'download') {
       if (page.url() !== startUrl) await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});

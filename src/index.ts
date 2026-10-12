@@ -1,5 +1,8 @@
 import fs from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import TurndownService from 'turndown';
 import { attachExistingChrome, cli, runCode, runCodeFile } from './extension-cli.js';
 import { discoverAttachmentsCode, downloadAttachmentCode, inspectPageHealthCode, navigateCode, normalCoursePlayerUrl, restoreLectureCode, type PageHealth } from './extension-ops.js';
@@ -21,7 +24,7 @@ type TextResult = { content: string | null; reason: string | null; availability?
 type LogEntry = { time: string; section: number; lecture: number; status: string; reason?: string; attachmentReason?: string };
 type CourseIdentity = { courseTitle: string; courseOwner: string; courseUrl: string };
 type DiscoveredAttachment = { sourceIndex: number; name: string; href: string; kind: 'download' | 'external' | 'unknown' };
-type DownloadResult = { kind: 'downloaded' | 'external' | 'retryable' | 'skipped'; suggestedFilename?: string; url?: string; reason?: string };
+type DownloadResult = { kind: 'downloaded' | 'direct' | 'external' | 'retryable' | 'skipped'; suggestedFilename?: string; url?: string; reason?: string };
 type TabVerification = { url: string; title: string; curriculum: boolean; authRequired: boolean };
 
 class SecurityChallengeError extends Error {
@@ -319,6 +322,10 @@ async function syncAttachments(root: string, section: Section, lecture: Lecture,
         continue;
       }
       if (result.kind === 'retryable') throw new TransientContentError(result.reason ?? 'Resource belum siap.');
+      if (result.kind === 'direct') {
+        if (!result.url) throw new Error('Signed URL resource tidak tersedia.');
+        await downloadSignedResource(result.url, temporary);
+      }
       if (!await existsNonempty(temporary)) throw new Error('File hasil download kosong atau tidak ditemukan.');
       const originalName = result.suggestedFilename?.trim() || attachment.name;
       const savedName = `${String(downloadPosition).padStart(2, '0')}_${cleanName(originalName)}`;
@@ -341,6 +348,20 @@ async function syncAttachments(root: string, section: Section, lecture: Lecture,
     }
     await checkpoint();
   }
+}
+
+function allowedResourceHost(hostname: string): boolean {
+  return hostname === 'udemy.com' || hostname.endsWith('.udemy.com') || hostname === 'udemycdn.com' || hostname.endsWith('.udemycdn.com');
+}
+
+async function downloadSignedResource(value: string, destination: string): Promise<void> {
+  const url = new URL(value);
+  if (url.protocol !== 'https:' || !allowedResourceHost(url.hostname)) throw new Error('Host signed URL resource tidak diizinkan.');
+  const response = await fetch(url, { redirect: 'follow' });
+  if (!response.ok || !response.body) throw new Error(`Download resource gagal dengan HTTP ${response.status}.`);
+  const finalUrl = new URL(response.url);
+  if (finalUrl.protocol !== 'https:' || !allowedResourceHost(finalUrl.hostname)) throw new Error('Redirect download resource menuju host yang tidak diizinkan.');
+  await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), createWriteStream(destination, { flags: 'wx' }));
 }
 
 async function saveExternalResourceIndex(root: string, section: Section, lecture: Lecture): Promise<string | null> {
