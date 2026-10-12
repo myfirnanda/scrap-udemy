@@ -10,7 +10,7 @@ import { existsNonempty } from './utils.js';
 const runFile = promisify(execFile);
 
 type MediaSource = {
-  availability: 'available' | 'retryable';
+  availability: 'available' | 'retryable' | 'unavailable';
   reason: string | null;
   mediaUrl: string | null;
   duration: number | null;
@@ -32,13 +32,15 @@ export type LocalWhisperResult = {
   source: 'whisper-local';
 };
 
+export class LocalWhisperUnavailableError extends Error {}
+
 function enabled(): boolean {
   return !['0', 'false', 'no'].includes((process.env.LOCAL_WHISPER_ENABLED ?? '1').toLowerCase());
 }
 
 export function shouldUseLocalWhisper(reason: string | null | undefined): boolean {
   if (!enabled()) return false;
-  return /kontrol transcript tidak (?:ditemukan|tersedia)|caption english tidak tersedia|panel transcript tersedia tetapi tidak memiliki cue/i.test(reason ?? '');
+  return /kontrol transcript tidak (?:ditemukan|tersedia)|caption english tidak tersedia|panel transcript (?:tersedia tetapi tidak memiliki cue|belum siap setelah timeout)/i.test(reason ?? '');
 }
 
 async function commandWorks(command: string, args: string[]): Promise<boolean> {
@@ -144,6 +146,7 @@ async function runWhisper(python: string, audioFile: string, resultFile: string,
 
 export async function transcribeWithLocalWhisper(root: string, lecture: Lecture, progress: LiveLine): Promise<LocalWhisperResult> {
   const media = await runCodeFile<MediaSource>('scripts/resolve-video-audio.js', 60_000);
+  if (media.availability === 'unavailable') throw new LocalWhisperUnavailableError(media.reason ?? 'Audio lecture tidak dapat diproses oleh Whisper lokal.');
   if (media.availability !== 'available' || !media.mediaUrl) throw new Error(media.reason ?? 'Audio lecture tidak ditemukan.');
   const mediaUrl = validateMediaUrl(media.mediaUrl);
   const duration = media.duration && media.duration > 0 ? media.duration : 0;

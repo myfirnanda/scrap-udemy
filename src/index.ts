@@ -14,7 +14,7 @@ import { appendTranscriptCues, transcriptCompletedLine, transcriptPercent, trans
 import { cleanName, courseFolderName, existsNonempty, pause, relativeResourceDir, writeJsonAtomic } from './utils.js';
 import { attachmentIdentity, uniqueAttachments } from './attachment-identity.js';
 import { isArabicTranscript } from './transcript-language.js';
-import { shouldUseLocalWhisper, transcribeWithLocalWhisper } from './local-whisper.js';
+import { LocalWhisperUnavailableError, shouldUseLocalWhisper, transcribeWithLocalWhisper } from './local-whisper.js';
 
 installConsoleLogFile(process.env.RUN_LOG_FILE);
 
@@ -175,7 +175,16 @@ async function extractVideoTranscript(progressLine: LiveLine, root: string, lect
     if (batch.availability !== 'available') {
       if ((allowLocalWhisper || batch.availability === 'unavailable') && shouldUseLocalWhisper(batch.reason)) {
         progressLine.update(`      Transcript Udemy tidak tersedia; memakai Whisper lokal untuk "${lecture.title}"...`);
-        return { ...(await transcribeWithLocalWhisper(root, lecture, progressLine)), availability: 'available', reason: null };
+        try {
+          return { ...(await transcribeWithLocalWhisper(root, lecture, progressLine)), availability: 'available', reason: null };
+        } catch (error) {
+          if (error instanceof LocalWhisperUnavailableError) {
+            progressLine.finish(`      Transcript [tidak tersedia] ${error.message}`);
+            activeTranscriptLine = null;
+            return { content: null, availability: 'unavailable', reason: error.message };
+          }
+          throw error;
+        }
       }
       progressLine.finish(`      Transcript [tidak tersedia] ${batch.reason ?? 'Panel transcript tidak tersedia.'}`);
       activeTranscriptLine = null;
